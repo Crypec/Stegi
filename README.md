@@ -1,4 +1,4 @@
-# Stegi
+# Stegi [![Build Status](https://travis-ci.org/Crypec/Stegi.svg?branch=master)](https://travis-ci.org/Crypec/Stegi)
 
 ![Stegi Dinosaurier Logo](https://github.com/Crypec/Stegi/blob/master/stegi_logo.jpg)
 
