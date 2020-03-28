@@ -1,9 +1,12 @@
-use super::errors::*;
+use std::cmp;
+use std::fmt;
 use std::str::FromStr;
 
-#[derive(PartialEq, Debug)]
+use super::errors::*;
+
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TokenKind {
-    Ident(String),
+    Ident,
 
     Keyword(Keyword),
 
@@ -13,6 +16,7 @@ pub enum TokenKind {
     Literal(Literal),
 
     PathSep,
+	Sep,
 
     // Delimiters
     LBrace,
@@ -35,9 +39,40 @@ pub enum TokenKind {
     Underscore,
     ColonEq,
     ThinArrow,
+    EOF,
 }
 
-#[derive(Debug, PartialEq)]
+impl fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let str = match self {
+            TokenKind::Ident => "ident",
+            TokenKind::Keyword(kw) => kw.as_str(),
+            TokenKind::Comment => "//",
+            TokenKind::Literal(l) => l.as_str(),
+            TokenKind::PathSep => "::",
+            TokenKind::LBrace => "{",
+            TokenKind::RBrace => "}",
+            TokenKind::LParen => "(",
+            TokenKind::RParen => ")",
+            TokenKind::LBracket => "[",
+            TokenKind::RBracket => "]",
+			TokenKind::Sep => "|",
+			TokenKind::Colon => ":",
+            TokenKind::Comma => ",",
+            TokenKind::Dot => ".",
+            TokenKind::Eq => "=",
+            TokenKind::Operator(op) => op.as_str(),
+            TokenKind::Semi => ",",
+            TokenKind::Underscore => "_",
+            TokenKind::ColonEq => ":=",
+            TokenKind::ThinArrow => "->",
+            TokenKind::EOF => "EOF",
+        };
+        write!(f, "{}", str)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Operator {
     // math and boolean operator
     Plus,
@@ -56,6 +91,32 @@ pub enum Operator {
     GreaterEq,
     Less,
     LessEq,
+}
+
+impl Operator {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Operator::Plus => "+",
+            Operator::Minus => "-",
+            Operator::Star => "*",
+            Operator::Slash => "/",
+            Operator::And => "und",
+            Operator::Or => "oder",
+            Operator::Not => "nicht",
+            Operator::EqEq => "gleich",
+            Operator::NotEq => "ungleich",
+            Operator::GreaterEq => ">=",
+            Operator::Greater => ">",
+            Operator::LessEq => "<=",
+            Operator::Less => "<",
+        }
+    }
+}
+
+impl fmt::Display for Operator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
 impl FromStr for Operator {
@@ -81,11 +142,23 @@ impl FromStr for Operator {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Literal {
     String(String),
     Number(f64),
     Bool(bool),
+}
+
+impl Eq for Literal {}
+
+impl Literal {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Literal::String(_) => "Textliteral",
+            Literal::Number(_) => "Zahlenliteral",
+            Literal::Bool(_) => "Boolliteral",
+        }
+    }
 }
 
 impl FromStr for Literal {
@@ -102,7 +175,7 @@ impl FromStr for Literal {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Eq, Clone)]
 pub enum Keyword {
     // keywords used internall by the language
     Fun,
@@ -117,8 +190,31 @@ pub enum Keyword {
     If,
     Then,
     Else,
-    True,
-    False,
+}
+
+impl Keyword {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Keyword::Fun => "fun",
+            Keyword::Struct => "typ",
+            Keyword::Impl => "implementiere",
+            Keyword::This => "selbst",
+            Keyword::While => "solange",
+            Keyword::Return => "rueckgabe",
+            Keyword::For => "fuer",
+            Keyword::Break => "stop",
+            Keyword::Range => "bis",
+            Keyword::If => "wenn",
+            Keyword::Then => "dann",
+            Keyword::Else => "sonst",
+        }
+    }
+}
+
+impl fmt::Display for Keyword {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
 }
 
 impl FromStr for Keyword {
@@ -127,7 +223,7 @@ impl FromStr for Keyword {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "funktion" | "fun" | "fn" => Ok(Keyword::Fun),
-            "Typ" => Ok(Keyword::Struct),
+            "Typ" | "typ" => Ok(Keyword::Struct),
             "implementiere" | "impl" => Ok(Keyword::Impl),
             "selbst" => Ok(Keyword::This),
             "solange" => Ok(Keyword::While),
@@ -138,33 +234,45 @@ impl FromStr for Keyword {
             "dann" => Ok(Keyword::Then),
             "sonst" => Ok(Keyword::Else),
             "stop" => Ok(Keyword::Break),
-            "wahr" => Ok(Keyword::True),
-            "falsch" => Ok(Keyword::False),
             _ => Err(()),
         }
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct Position {
-    start: usize,
-    end: usize,
-    line: usize,
+#[derive(Debug, Clone)]
+pub struct Position {
+    pub span: Span,
+    pub line: usize,
+    pub file: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
-    kind: TokenKind,
-    lexeme: String,
-    span: Span,
-    line: usize,
-}
-#[derive(Debug)]
-pub struct Span {
-    hi: usize,
-    lo: usize,
+    pub kind: TokenKind,
+    pub lexeme: String,
+    pub span: Span,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct Span {
+    pub lo: usize,
+    pub hi: usize,
+}
+
+impl Span {
+    pub fn new(lo: usize, hi: usize) -> Self {
+        Span { lo, hi }
+    }
+
+    pub fn combine(&self, rhs: &Span) -> Self {
+        Span {
+            lo: cmp::min(self.lo, rhs.lo),
+            hi: cmp::max(self.hi, rhs.hi),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Lexer {
     buffer: String,
     cursor: usize,
@@ -203,6 +311,7 @@ impl Lexer {
         match self.peek() {
             Some(c) => {
                 if p(c) {
+                    self.advance()?;
                     Some(res)
                 } else {
                     None
@@ -226,13 +335,14 @@ impl Lexer {
     }
 
     pub fn eat_whitespace(&mut self) {
-        self.advance_while(|c| *c == ' ' || *c == '\t' || *c == '\n');
+        self.advance_while(|c| c.is_whitespace());
     }
 
     pub fn scan_token(&mut self) -> Option<Result<Token, SyntaxError>> {
-        self.eat_whitespace();
 
+        self.eat_whitespace();
         let start = self.cursor;
+
         let c = self.advance()?;
 
         let token_kind = match c {
@@ -249,9 +359,9 @@ impl Lexer {
             '-' => self
                 .map_if(|p| p == '>', TokenKind::ThinArrow)
                 .unwrap_or(TokenKind::Operator(Operator::Minus)),
-            ':' => self
-                .map_if(|p| p == '=', TokenKind::ColonEq)
-                .unwrap_or(TokenKind::Colon),
+            '|' => self
+                .map_if(|p| p == '|', TokenKind::Operator(Operator::Or))
+                .unwrap_or(TokenKind::Sep),
             '!' => self
                 .map_if(|p| p == '=', TokenKind::Keyword(Keyword::Range))
                 .unwrap_or(TokenKind::Operator(Operator::Not)),
@@ -292,11 +402,17 @@ impl Lexer {
                     TokenKind::Operator(Operator::Slash)
                 }
             }
+
+            '_' => match self.peek().unwrap() {
+                'a'..='z' | 'A'..='Z' => self.ident(start),
+                _ => TokenKind::Underscore,
+            },
+
             _ if c.is_digit(10) => match self.number(start) {
                 Ok(tk) => tk,
                 Err(err) => return Some(Err(err)),
             },
-            'a'..='z' | 'A'..='Z' | '_' => self.ident(start),
+            'a'..='z' | 'A'..='Z' => self.ident(start),
             c => return Some(Err(SyntaxError::UnexpectedChar(c, self.line))),
         };
         let token = self.yield_token(start, token_kind);
@@ -306,17 +422,8 @@ impl Lexer {
     fn yield_token(&mut self, start: usize, kind: TokenKind) -> Token {
         let lexeme = self.sub_string(start);
         let len = lexeme.len();
-        let span = Span {
-            lo: start,
-            hi: start + len,
-        };
-
-        Token {
-            kind,
-            lexeme,
-            span,
-            line: self.line,
-        }
+        let span = Span::new(start, (start + len) - 1);
+        Token { kind, lexeme, span }
     }
 
     fn sub_string(&mut self, start: usize) -> String {
@@ -358,7 +465,7 @@ impl Lexer {
             .map(TokenKind::Keyword)
             .map_err(|_| str::parse::<Operator>(&lexeme))
             .map_err(|_| str::parse::<Literal>(&lexeme))
-            .unwrap_or(TokenKind::Ident(lexeme))
+            .unwrap_or(TokenKind::Ident)
     }
 
     fn is_at_end(&mut self) -> bool {
