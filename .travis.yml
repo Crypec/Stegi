@@ -11,11 +11,10 @@ matrix:
   allow_failures:
     - rust: nightly
 
-install:
-  - (cargo install rustfmt || true)
-  - PATH=$PATH:/home/travis/.cargo/bin
+before_script:
+        - rustup component add rustfmt
 
 script:
-  - cargo fmt -- --write-mode=diff
+  - cargo fmt -- --check
   - cargo build --verbose
   - cargo test --verbose
