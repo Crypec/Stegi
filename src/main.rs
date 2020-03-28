@@ -1,8 +1,43 @@
-mod parser;
+#![allow(dead_code)]
+
+use std::fs;
+
 mod ast;
+mod errors;
 mod lexer;
-mod report;
+mod parser;
+
+#[macro_use]
+extern crate failure;
+
+#[macro_use]
+extern crate derivative;
+
+use self::ast::*;
+use self::errors::*;
+use self::lexer::*;
+use self::parser::*;
+
+use std::time::{Duration, Instant};
 
 fn main() {
-	println!("Hello from the new stegi compiler");
+    let prog = fs::read_to_string("./examples/test.st").expect("failed to read file");
+
+    let now = Instant::now();
+    println!("Hello from the new stegi compiler");
+    let res = Lexer::new(&prog).collect::<Result<Vec<Token>, SyntaxError>>();
+
+    let tokens = match res {
+        Err(e) => {
+            println!("Fehler beim Kompilieren");
+            eprintln!("{}", e);
+            std::process::exit(1);
+        }
+        Ok(t) => t,
+    };
+
+    let asd = Parser::new(tokens).collect::<Result<Vec<Stmt>, SyntaxError>>();
+	let time = now.elapsed();
+	println!("{:#?}", asd);
+    println!("{:#?}", time);
 }
