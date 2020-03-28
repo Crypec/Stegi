@@ -16,10 +16,10 @@ pub enum ExprKind {
 
     Tup(Vec<Expr>),
 
-	#[derivative(Debug = "transparent")]
-	Path(Path),
+    #[derivative(Debug = "transparent")]
+    Path(Path),
 
-	#[derivative(Debug = "transparent")]
+    #[derivative(Debug = "transparent")]
     Index(Index),
 
     Assign(Box<Expr>, Box<Expr>),
@@ -81,11 +81,10 @@ pub enum Stmt {
 
     Var(Variable, Expr),
 
+    #[derivative(Debug = "transparent")]
+    EnumDecl(EnumDecl),
 
     #[derivative(Debug = "transparent")]
-	EnumDecl(EnumDecl),
-
-	#[derivative(Debug = "transparent")]
     Block(Block),
 
     If(Expr, Block, Option<Box<Stmt>>),
@@ -106,34 +105,33 @@ pub enum Stmt {
 
 #[derive(Debug)]
 pub struct EnumDecl {
-	pub ident: Ident,
-	pub variants: Vec<Variant>,
-	pub span: Span,
+    pub ident: Ident,
+    pub variants: Vec<Variant>,
+    pub span: Span,
 }
 
 impl EnumDecl {
-	pub fn new(ident: Ident, variants: Vec<Variant>, span: Span) -> Self {
-		EnumDecl {
-			ident,
-			variants,
-			span,
-		}
-	}
+    pub fn new(ident: Ident, variants: Vec<Variant>, span: Span) -> Self {
+        EnumDecl {
+            ident,
+            variants,
+            span,
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct Variant {
-	pub span: Span,
-	pub ident: Ident,
-	pub data: VariantData,
+    pub span: Span,
+    pub ident: Ident,
+    pub data: VariantData,
 }
 
 #[derive(Debug)]
 pub enum VariantData {
-	Tuple(Vec<Ty>),
-	Unit,
+    Tuple(Vec<Ty>),
+    Unit,
 }
-
 
 #[derive(Debug)]
 pub struct Local {

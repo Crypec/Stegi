@@ -16,7 +16,7 @@ pub enum TokenKind {
     Literal(Literal),
 
     PathSep,
-	Sep,
+    Sep,
 
     // Delimiters
     LBrace,
@@ -56,8 +56,8 @@ impl fmt::Display for TokenKind {
             TokenKind::RParen => ")",
             TokenKind::LBracket => "[",
             TokenKind::RBracket => "]",
-			TokenKind::Sep => "|",
-			TokenKind::Colon => ":",
+            TokenKind::Sep => "|",
+            TokenKind::Colon => ":",
             TokenKind::Comma => ",",
             TokenKind::Dot => ".",
             TokenKind::Eq => "=",
@@ -339,7 +339,6 @@ impl Lexer {
     }
 
     pub fn scan_token(&mut self) -> Option<Result<Token, SyntaxError>> {
-
         self.eat_whitespace();
         let start = self.cursor;
 

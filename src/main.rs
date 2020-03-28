@@ -37,7 +37,7 @@ fn main() {
     };
 
     let asd = Parser::new(tokens).collect::<Result<Vec<Stmt>, SyntaxError>>();
-	let time = now.elapsed();
-	println!("{:#?}", asd);
+    let time = now.elapsed();
+    println!("{:#?}", asd);
     println!("{:#?}", time);
 }

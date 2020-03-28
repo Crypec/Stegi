@@ -79,27 +79,27 @@ impl Parser {
     fn parse_decl(&mut self) -> ParseResult<Stmt> {
         match self.peek_kind()? {
             TokenKind::Keyword(Keyword::Struct) => self.parse_ty_decl(),
-			TokenKind::Keyword(Keyword::Fun) => self.parse_fn_decl(),
+            TokenKind::Keyword(Keyword::Fun) => self.parse_fn_decl(),
             TokenKind::Keyword(Keyword::Impl) => self.parse_impl_block(),
             _ => panic!("invalide declaration {:#?}", self.peek()),
         }
     }
 
-	fn parse_ty_decl(&mut self) -> ParseResult<Stmt> {
-		self.iter.peek();
-		self.iter.peek();
-		match self.iter.peek().unwrap().kind {
-			TokenKind::LBrace => {
-				self.iter.reset_peek();
-				self.parse_struct_decl()
-			}
-			TokenKind::Eq => {
-				self.iter.reset_peek();
-				self.parse_enum_decl()
-			}
-			_ => panic!("invalider token nach typendeclaration"),
-		}
-	}
+    fn parse_ty_decl(&mut self) -> ParseResult<Stmt> {
+        self.iter.peek();
+        self.iter.peek();
+        match self.iter.peek().unwrap().kind {
+            TokenKind::LBrace => {
+                self.iter.reset_peek();
+                self.parse_struct_decl()
+            }
+            TokenKind::Eq => {
+                self.iter.reset_peek();
+                self.parse_enum_decl()
+            }
+            _ => panic!("invalider token nach typendeclaration"),
+        }
+    }
 
     pub fn parse_fn_header(&mut self) -> ParseResult<FnSig> {
         self.expect(TokenKind::Keyword(Keyword::Fun), "Funktionsdeklaration")?;
@@ -319,46 +319,51 @@ impl Parser {
         }))
     }
 
-	fn parse_enum_decl(&mut self) -> ParseResult<Stmt> {
-		let start = self.expect(TokenKind::Keyword(Keyword::Struct), "enum or struct declaration")?.span;
-		let name: Ident = self.expect(TokenKind::Ident, "Enum Name")?.into();
-		self.expect(TokenKind::Eq, "EnumDecl")?;
-		let mut variants = Vec::new();
-		loop {
-			match self.peek_kind()? {
-				TokenKind::Sep => variants.push(self.parse_enum_variant()?),
-				_ => break,
-			};
-		}
-		let end = start.combine(&variants.last().unwrap().span); // TODO(Simon): provide better error if enum has no fields
-		let decl = EnumDecl::new(name, variants, start.combine(&end));
-		Ok(Stmt::EnumDecl(decl))
-	}
+    fn parse_enum_decl(&mut self) -> ParseResult<Stmt> {
+        let start = self
+            .expect(
+                TokenKind::Keyword(Keyword::Struct),
+                "enum or struct declaration",
+            )?
+            .span;
+        let name: Ident = self.expect(TokenKind::Ident, "Enum Name")?.into();
+        self.expect(TokenKind::Eq, "EnumDecl")?;
+        let mut variants = Vec::new();
+        loop {
+            match self.peek_kind()? {
+                TokenKind::Sep => variants.push(self.parse_enum_variant()?),
+                _ => break,
+            };
+        }
+        let end = start.combine(&variants.last().unwrap().span); // TODO(Simon): provide better error if enum has no fields
+        let decl = EnumDecl::new(name, variants, start.combine(&end));
+        Ok(Stmt::EnumDecl(decl))
+    }
 
-	fn parse_enum_variant(&mut self) -> ParseResult<Variant> {
-		let  start = self.expect(TokenKind::Sep, "enum variante")?.span;
-		let ident: Ident = self.expect(TokenKind::Ident, "Feldname")?.into();
-		let (data, end) = match self.peek_kind()? {
-			TokenKind::LParen => {
-				self.advance()?;
-				let mut elems = Vec::new();
-				loop {
-					match self.peek_kind()? {
-						TokenKind::RParen => break,
-						_ => elems.push(self.parse_ty_specifier()?),
-					};
-				}
-				let end = self.expect(TokenKind::RParen, "enum arm")?.span;
-				(VariantData::Tuple(elems), end)
-			}
-			_ => (VariantData::Unit, ident.span),
-		};
-		Ok(Variant {
-			span: start.combine(&end),
-			ident,
-			data,
-		})
-	}
+    fn parse_enum_variant(&mut self) -> ParseResult<Variant> {
+        let start = self.expect(TokenKind::Sep, "enum variante")?.span;
+        let ident: Ident = self.expect(TokenKind::Ident, "Feldname")?.into();
+        let (data, end) = match self.peek_kind()? {
+            TokenKind::LParen => {
+                self.advance()?;
+                let mut elems = Vec::new();
+                loop {
+                    match self.peek_kind()? {
+                        TokenKind::RParen => break,
+                        _ => elems.push(self.parse_ty_specifier()?),
+                    };
+                }
+                let end = self.expect(TokenKind::RParen, "enum arm")?.span;
+                (VariantData::Tuple(elems), end)
+            }
+            _ => (VariantData::Unit, ident.span),
+        };
+        Ok(Variant {
+            span: start.combine(&end),
+            ident,
+            data,
+        })
+    }
 
     fn parse_ty_kind(&mut self) -> ParseResult<TyKind> {
         match self.peek_kind()? {
