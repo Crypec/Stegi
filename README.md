@@ -1,7 +1,6 @@
 # Stegi
 
-![Stegi Dinosaurier Logo]
-(https://github.com/Crypec/Stegi/stegi_logo.jpg)
+![Stegi Dinosaurier Logo](https://github.com/Crypec/Stegi/stegi_logo.jpg)
 
 ## Stegi installieren
 Stegi ist in der Progammiersprache [Rust](https://www.rust-lang.org/) geschriben. Du musst also eine Version des Rustkompilers auf deinem System installieren.
