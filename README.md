@@ -1,6 +1,13 @@
-# Stegi [![Build Status](https://travis-ci.org/Crypec/Stegi.svg?branch=master)](https://travis-ci.org/Crypec/Stegi)
-
 ![Stegi Dinosaurier Logo](https://github.com/Crypec/Stegi/blob/master/stegi_logo.jpg)
+# Stegi
+
+> Eine Programmiersprache entwickelt speziell fuer Anfaenger
+
+[![Build Status](https://travis-ci.org/Crypec/Stegi.svg?branch=master)](https://travis-ci.org/Crypec/Stegi)
+![Platforms](https://img.shields.io/badge/platforms-Windows%2C%20macOS%20and%20Linux-blue)
+![License](https://img.shields.io/github/license/crypec/stegi)
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/crypec/Stegi)
+
 
 ## Stegi installieren
 Stegi ist in der Progammiersprache [Rust](https://www.rust-lang.org/) geschriben. Du musst also eine Version des Rustkompilers auf deinem System installieren.
