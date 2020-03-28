@@ -1,128 +1,411 @@
-pub enum TokenKind {
-	Ident,
+use super::lexer::*;
 
-	Keyword(Keyword),
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub enum ExprKind {
+    #[derivative(Debug = "transparent")]
+    Binary(Binary),
 
-	// Values for internally supported types
-	Literal(Literal),
+    #[derivative(Debug = "transparent")]
+    Unary(Unary),
 
-	PathSep,
+    #[derivative(Debug = "transparent")]
+    Logical(Logical),
 
-	
-	// Delimiters
-	CurlyOpen,
-	CurlyClosed,
-	LParen,
-	RParen,
-	LBracket,
-	RBracket,
+    Struct(Struct),
 
-	Colon,
-	Dot,
-	Comma,
+    Tup(Vec<Expr>),
 
+	#[derivative(Debug = "transparent")]
+	Path(Path),
 
-	Eq,
+	#[derivative(Debug = "transparent")]
+    Index(Index),
 
+    Assign(Box<Expr>, Box<Expr>),
 
-	// Comparison operators
-	EqEq,
-	NotEq,
-	Greater,
-	GreaterEq,
-	Less,
-	LessEq,
+    Array(Vec<Expr>),
 
+    Range(Box<Expr>, Box<Expr>),
 
-	// other punktuation tokens
-	Semi,
-	Underscore,
-	ColonEq,
-	ThinArrow,
+    Literal(Literal, Span),
 
+    #[derivative(Debug = "transparent")]
+    Variable(Variable),
 
-	EOF,
+    Field(Box<Expr>, Ident),
+
+    This(Variable, Span),
+
+    #[derivative(Debug = "transparent")]
+    Call(Call),
 }
 
-impl TokenKind {
-	fn match_kind(src: &str) -> Self {
-		match src {
-			"funktion" | "fun" | "fn" => TokenKind::Keyword(Keyword::Fun),
-			"Typ:" => TokenKind::Keyword(Keyword::Struct),
-			"implementiere" | "impl" => TokenKind::Keyword(Keyword::Impl),
-			"selbst" => TokenKind::Keyword(Keyword::This),
-			"solange" => TokenKind::Keyword(Keyword::While),
-			"rueckgabe" => TokenKind::Keyword(Keyword::Return),
-			"fuer" => TokenKind::Keyword(Keyword::For),
-			".." | "bis" => TokenKind::Keyword(Keyword::Range),
-			"wenn" => TokenKind::Keyword(Keyword::If),
-			"dann" => TokenKind::Keyword(Keyword::Then),
-			"sonst" => TokenKind::Keyword(Keyword::Else),
-			"stop" => TokenKind::Keyword(Keyword::Break),
+#[derive(Debug)]
+pub struct Index {
+    pub callee: Box<Expr>,
+    pub index: Box<Expr>,
+}
 
-			"::" => TokenKind::PathSep,
+#[derive(Debug)]
+pub struct Member {
+    pub ident: Ident,
+    pub expr: Box<Expr>,
+    pub span: Span,
+}
 
-			"{" => TokenKind::CurlyOpen,
-			"}" => TokenKind::CurlyClosed,
+impl Member {
+    pub fn new(ident: Ident, expr: Expr, span: Span) -> Self {
+        Self {
+            ident,
+            expr: Box::new(expr),
+            span,
+        }
+    }
+}
 
-			"(" => TokenKind::LParen,
-			")" => TokenKind::RParen,
+#[derive(Debug)]
+pub struct Struct {
+    pub pat: Path,
+    pub members: Vec<Member>,
+}
 
-			"[" => TokenKind::RBracket,
-			"]" => TokenKind::RBracket,
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub enum Stmt {
+    #[derivative(Debug = "transparent")]
+    Expr(Expr),
 
-			":" => TokenKind::Colon,
-			"." => TokenKind::Dot,
-			"," => TokenKind::Comma,
+    #[derivative(Debug = "transparent")]
+    Local(Box<Local>),
 
-			"=" => TokenKind::Eq,
+    Var(Variable, Expr),
 
-			"==" => TokenKind::EqEq,
-			"!=" => TokenKind::NotEq,
-			"<" => TokenKind::Greater,
-			">" => TokenKind::Less,
-			"<=" => TokenKind::GreaterEq,
-			"=>" => TokenKind::LessEq,
-			";" => TokenKind::Semi,
-			"_" => TokenKind::Underscore,
-			":=" => TokenKind::ColonEq,
-			"->" => TokenKind::ThinArrow,
-			_ => TokenKind::Ident,
+
+    #[derivative(Debug = "transparent")]
+	EnumDecl(EnumDecl),
+
+	#[derivative(Debug = "transparent")]
+    Block(Block),
+
+    If(Expr, Block, Option<Box<Stmt>>),
+    While(Expr, Block),
+
+    For(ForLoop),
+
+    Break,
+
+    Ret(Expr, Span),
+
+    #[derivative(Debug = "transparent")]
+    FnDecl(FnDecl),
+
+    #[derivative(Debug = "transparent")]
+    StructDecl(StructDecl),
+}
+
+#[derive(Debug)]
+pub struct EnumDecl {
+	pub ident: Ident,
+	pub variants: Vec<Variant>,
+	pub span: Span,
+}
+
+impl EnumDecl {
+	pub fn new(ident: Ident, variants: Vec<Variant>, span: Span) -> Self {
+		EnumDecl {
+			ident,
+			variants,
+			span,
 		}
 	}
 }
 
-pub enum Literal {
-	String(String),
-	Number(f64),
-	Bool(bool),
+#[derive(Debug)]
+pub struct Variant {
+	pub span: Span,
+	pub ident: Ident,
+	pub data: VariantData,
 }
 
-pub enum Keyword {
-	// keywords used internall by the language
-	Fun,
-	Struct,
-	Impl,
-	This,
-	While,
-	Return,
-	For,
-	Break,
-	Range,
-	If,
-	Then,
-	Else,
+#[derive(Debug)]
+pub enum VariantData {
+	Tuple(Vec<Ty>),
+	Unit,
 }
 
 
-struct Position {
-	start: u64,
-	end: u64,
-	line: u64,
+#[derive(Debug)]
+pub struct Local {
+    pub init: Expr,
+    pub pat: Path, // TODO(Simon): this should be a pattern to assign to
+    pub ty: Option<Ty>,
+    pub span: Span,
 }
 
-pub struct Token {
-	kind: TokenKind,
-	pos: Position,
-	literal: String,
+impl Local {
+    pub fn new(init: Expr, pat: Path, ty: Option<Ty>, span: Span) -> Self {
+        Local {
+            init,
+            pat,
+            ty,
+            span,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ForLoop {
+    pub it: Expr,
+    pub var: Ident,
+    pub body: Block,
+    pub span: Span,
+}
+
+impl ForLoop {
+    pub fn new(it: Expr, var: Ident, body: Block, span: Span) -> Self {
+        ForLoop {
+            it,
+            var,
+            body,
+            span,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Path {
+    pub segments: Vec<Ident>,
+    pub span: Span,
+}
+
+impl Path {
+    pub fn new(segments: Vec<Ident>, span: Span) -> Self {
+        Path { segments, span }
+    }
+}
+
+#[derive(Debug)]
+pub struct Param {
+    pub name: Ident,
+    pub ty: TyKind,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct StructDecl {
+    pub name: Ident,
+    pub fields: Vec<Field>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct Field {
+    pub name: Ident,
+    pub ty: Ty,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct Ident {
+    pub name: String,
+    pub span: Span,
+}
+
+impl From<Token> for Ident {
+    fn from(item: Token) -> Self {
+        Ident {
+            name: item.lexeme,
+            span: item.span,
+        }
+    }
+}
+
+impl Ident {
+    pub fn new(name: String, span: Span) -> Self {
+        Ident { name, span }
+    }
+}
+
+impl Field {
+    pub fn new(name: Ident, ty: Ty, span: Span) -> Self {
+        Field { name, ty, span }
+    }
+}
+
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub enum TyKind {
+    #[derivative(Debug = "transparent")]
+    Array(Box<TyKind>),
+
+    #[derivative(Debug = "transparent")]
+    Tup(Vec<TyKind>),
+
+    #[derivative(Debug = "transparent")]
+    Path(Path),
+}
+
+#[derive(Debug)]
+pub struct Ty {
+    pub kind: TyKind,
+    pub span: Span,
+}
+
+impl Ty {
+    pub fn default_unit_type(start: Span) -> Self {
+        Ty {
+            kind: TyKind::Tup(Vec::new()),
+            // TODO(Simon): are these correct and do we really need these
+            span: Span::new(start.lo + 4, start.hi + 6),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct FnSig {
+    pub name: Ident,
+    pub params: Vec<(Ident, Ty)>,
+    pub ret_ty: Ty,
+}
+
+impl FnSig {
+    pub fn new(name: Ident, params: Vec<(Ident, Ty)>, ret_ty: Ty) -> Self {
+        FnSig {
+            name,
+            params,
+            ret_ty,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct FnDecl {
+    pub head: FnSig,
+    pub body: Block,
+}
+
+impl FnDecl {
+    pub fn new(head: FnSig, body: Block) -> Self {
+        FnDecl { head, body }
+    }
+}
+
+#[derive(Debug)]
+pub struct Block {
+    pub stmts: Vec<Stmt>,
+    pub span: Span,
+}
+
+impl Block {
+    pub fn new(stmts: Vec<Stmt>, span: Span) -> Self {
+        Block { stmts, span }
+    }
+}
+
+impl ExprKind {
+    pub fn binary(lhs: Expr, rhs: Expr, op: TokenKind) -> Self {
+        ExprKind::Binary(Binary {
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            op,
+        })
+    }
+    pub fn logical(lhs: Expr, rhs: Expr, op: TokenKind) -> Self {
+        ExprKind::Logical(Logical {
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            op,
+        })
+    }
+
+    pub fn unary(rhs: Expr, op: TokenKind) -> Self {
+        ExprKind::Unary(Unary {
+            rhs: Box::new(rhs),
+            op,
+        })
+    }
+
+    pub fn field(lhs: Expr, ident: Ident) -> Self {
+        ExprKind::Field(Box::new(lhs), ident)
+    }
+
+    pub fn call(callee: Expr, args: Vec<Expr>) -> Self {
+        ExprKind::Call(Call {
+            callee: Box::new(callee),
+            args,
+        })
+    }
+    pub fn index(callee: Expr, index: Expr) -> Self {
+        ExprKind::Index(Index {
+            callee: Box::new(callee),
+            index: Box::new(index),
+        })
+    }
+
+    pub fn struct_lit(pat: Path, members: Vec<Member>) -> Self {
+        ExprKind::Struct(Struct { pat, members })
+    }
+}
+
+impl Default for ExprKind {
+    fn default() -> Self {
+        ExprKind::Tup(Vec::new())
+    }
+}
+
+#[derive(Debug)]
+pub struct Expr {
+    pub node: ExprKind,
+    pub span: Span,
+}
+
+#[derive(Debug)]
+pub struct Binary {
+    pub lhs: Box<Expr>,
+    pub rhs: Box<Expr>,
+    pub op: TokenKind,
+}
+
+#[derive(Debug)]
+pub struct Unary {
+    pub rhs: Box<Expr>,
+    pub op: TokenKind,
+}
+
+#[derive(Debug)]
+pub struct Logical {
+    pub lhs: Box<Expr>,
+    pub rhs: Box<Expr>,
+    pub op: TokenKind,
+}
+
+#[derive(Debug)]
+pub struct Call {
+    pub callee: Box<Expr>,
+    pub args: Vec<Expr>,
+}
+
+#[derive(Debug)]
+pub struct Variable {
+    pub name: String,
+    pub depth: Option<usize>,
+    pub function_depth: usize,
+}
+
+impl Variable {
+    pub fn new_local(name: &str) -> Self {
+        Variable {
+            name: name.to_owned(),
+            depth: Some(0),
+            function_depth: 0,
+        }
+    }
+    pub fn new_global(name: &str) -> Self {
+        Variable {
+            name: name.to_owned(),
+            depth: None,
+            function_depth: 0,
+        }
+    }
 }
