@@ -1,0 +1,23 @@
+#Rust project
+language: rust
+cache: cargo
+
+sudo: false
+
+rust:
+  -stable
+  -beta
+  -nightly
+
+matrix:
+  allow_failures:
+    - rust: nightly
+
+install:
+  - (cargo install rustfmt || true)
+  - PATH=$PATH:/home/travis/.cargo/bin
+
+script:
+  - cargo fmt -- --write-mode=diff
+  - cargo build --verbose
+  - cargo test --verbose
