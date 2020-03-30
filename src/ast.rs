@@ -1,5 +1,16 @@
 use super::lexer::*;
 
+pub trait ASTNode {
+    fn accept<V: Visitor>(&mut self, visitor: &mut V) -> V::Result;
+}
+
+pub trait Visitor {
+    type Result;
+
+    fn visit_stmt(&mut self, stmt: &Stmt) -> Self::Result;
+    fn visit_expr(&mut self, expr: &Expr) -> Self::Result;
+}
+
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub enum ExprKind {
@@ -101,6 +112,12 @@ pub enum Stmt {
 
     #[derivative(Debug = "transparent")]
     StructDecl(StructDecl),
+}
+
+impl ASTNode for Stmt {
+    fn accept<V: Visitor>(&mut self, visitor: &mut V) -> V::Result {
+        visitor.visit_stmt(self)
+    }
 }
 
 #[derive(Debug)]
@@ -234,13 +251,19 @@ impl Field {
 pub const DUMMY_TYPE_ID: usize = usize::MAX;
 
 #[derive(Derivative)]
-#[derivative(Debug)]
+#[derivative(Debug, Clone)]
 pub enum TyKind {
     #[derivative(Debug = "transparent")]
     Array(Box<TyKind>),
 
     #[derivative(Debug = "transparent")]
     Tup(Vec<TyKind>),
+
+    Num,
+
+    Bool,
+
+    Text,
 
     #[derivative(Debug = "transparent")]
     Infer(usize),
@@ -249,7 +272,7 @@ pub enum TyKind {
     Path(Path),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Ty {
     pub kind: TyKind,
     pub span: Span,
@@ -271,8 +294,22 @@ impl Ty {
         }
     }
 
+    pub fn new_unit(kind: TyKind, span: Span) -> Self {
+        Self {
+            kind: TyKind::Tup(vec![kind]), // NOTE(Simon): maybe we dont even need this, but I think it is going to make type checking easier later on
+            span,
+        }
+    }
+
     pub fn new(kind: TyKind, span: Span) -> Self {
         Self { kind, span }
+    }
+
+    pub fn is_unit(&self) -> bool {
+        match self.kind {
+            TyKind::Tup(ref t) => t.len() == 1,
+            _ => false,
+        }
     }
 }
 
@@ -373,6 +410,12 @@ pub struct Expr {
     pub node: ExprKind,
     pub ty: Ty,
     pub span: Span,
+}
+
+impl ASTNode for Expr {
+    fn accept<V: Visitor>(&mut self, visitor: &mut V) -> V::Result {
+        visitor.visit_expr(self)
+    }
 }
 
 impl Expr {
