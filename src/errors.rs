@@ -23,3 +23,8 @@ pub enum SyntaxError {
     )]
     BreakOutsideLoop,
 }
+
+pub enum TypeError {
+    InvalidType,
+    VarNameNotFound,
+}
