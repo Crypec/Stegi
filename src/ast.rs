@@ -243,9 +243,9 @@ pub enum TyKind {
     Tup(Vec<TyKind>),
 
     #[derivative(Debug = "transparent")]
-	Infer(usize),
+    Infer(usize),
 
-	#[derivative(Debug = "transparent")]
+    #[derivative(Debug = "transparent")]
     Path(Path),
 }
 
@@ -264,19 +264,16 @@ impl Ty {
         }
     }
 
-	pub fn default_infer_type(span: Span) -> Self {
+    pub fn default_infer_type(span: Span) -> Self {
         Self {
             kind: TyKind::Infer(DUMMY_TYPE_ID),
             span,
         }
-	}
+    }
 
-	pub fn new(kind: TyKind, span: Span) -> Self {
-		Self {
-			kind,
-			span,
-		}
-	}
+    pub fn new(kind: TyKind, span: Span) -> Self {
+        Self { kind, span }
+    }
 }
 
 #[derive(Debug)]
@@ -374,26 +371,26 @@ impl Default for ExprKind {
 #[derive(Debug)]
 pub struct Expr {
     pub node: ExprKind,
-	pub ty: Ty,
-	pub span: Span,
+    pub ty: Ty,
+    pub span: Span,
 }
 
 impl Expr {
-	pub fn new(node: ExprKind, span: Span) -> Self {
-		Self {
-			node,
-			span,
-			ty: Ty::default_infer_type(span.clone()),
-		}
-	}
+    pub fn new(node: ExprKind, span: Span) -> Self {
+        Self {
+            node,
+            span,
+            ty: Ty::default_infer_type(span.clone()),
+        }
+    }
 
-	pub fn empty(span: Span) -> Self {
-		Self {
-			node: ExprKind::Tup(Vec::new()),
-			span,
-			ty: Ty::default_infer_type(span.clone()),
-		}
-	}
+    pub fn empty(span: Span) -> Self {
+        Self {
+            node: ExprKind::Tup(Vec::new()),
+            span,
+            ty: Ty::default_infer_type(span.clone()),
+        }
+    }
 }
 
 #[derive(Debug)]
