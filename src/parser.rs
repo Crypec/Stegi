@@ -25,6 +25,7 @@ macro_rules! __bin_op_rule (
 				let span = lhs.span.combine(&rhs.span);
 				lhs = Expr {
 					node: ExprKind::$kind(lhs, rhs, op.kind),
+					ty: Ty::default_infer_type(span.clone()),
 					span,
 				};
 			}
@@ -197,10 +198,7 @@ impl Parser {
             )?
             .span;
         let ret_val = match self.peek_kind()? {
-            TokenKind::Semi => Expr {
-                node: ExprKind::default(),
-                span: start,
-            },
+            TokenKind::Semi => Expr::empty(start),
             _ => self.parse_expr()?,
         };
         let end = self
@@ -463,7 +461,7 @@ impl Parser {
         self.parse_and()
     }
 
-    fn parse_unary(&mut self) -> Result<Expr, SyntaxError> {
+    fn parse_unary(&mut self) -> ParseResult<Expr> {
         match self.peek_kind()? {
             TokenKind::Operator(Operator::Not) | TokenKind::Operator(Operator::Minus) => {
                 let op = self.advance()?;
@@ -471,7 +469,8 @@ impl Parser {
                 let span = op.span.combine(&rhs.span);
                 Ok(Expr {
                     node: ExprKind::unary(rhs, op.kind),
-                    span,
+					span: span.clone(),
+					ty: Ty::default_infer_type(span),
                 })
             }
             _ => self.parse_literal(),
@@ -480,11 +479,12 @@ impl Parser {
 
     fn parse_literal(&mut self) -> ParseResult<Expr> {
         match self.peek_kind()? {
-            TokenKind::Literal(l) => {
+            TokenKind::Literal(lit) => {
                 let span = self.advance()?.span;
                 Ok(Expr {
-                    node: ExprKind::Literal(l, span),
-                    span,
+                    node: ExprKind::Literal(lit, span),
+					ty: Ty::default_infer_type(span),
+					span,
                 })
             }
             TokenKind::LParen => self.parse_tup(),
@@ -532,9 +532,13 @@ impl Parser {
             .span;
         let span = pat.span.combine(&end);
         let expr = Expr {
-            node: ExprKind::struct_lit(pat, members),
+            node: ExprKind::struct_lit(pat.clone(), members),
             span,
-        };
+			ty: Ty {
+				kind: TyKind::Path(pat.clone()),
+				span,
+			}
+		};
         Ok(expr)
     }
 
@@ -544,7 +548,7 @@ impl Parser {
                 let var = Variable::new_local("selbst");
                 let span = self.advance()?.span;
                 let node = ExprKind::This(var, span);
-                Ok(Expr { node, span })
+                Ok(Expr::new(node, span))
             }
             TokenKind::Ident => {
                 let token = self.advance()?;
@@ -552,6 +556,7 @@ impl Parser {
                 Ok(Expr {
                     node: ExprKind::Variable(var),
                     span: token.span,
+					ty: Ty::default_infer_type(token.span),
                 })
             }
             _ => Err(SyntaxError::UnexpectedEOF),
@@ -569,10 +574,12 @@ impl Parser {
             };
         }
         let end = self.expect(TokenKind::RParen, "schliessende Klammer")?.span;
-        Ok(Expr {
-            node: ExprKind::Tup(values),
-            span: start.combine(&end),
-        })
+		let span = start.combine(&end);
+		Ok(Expr {
+			node: ExprKind::Tup(values),
+			span,
+			ty: Ty::default_infer_type(span),
+		})
     }
 
     fn parse_arr(&mut self) -> ParseResult<Expr> {
@@ -586,10 +593,12 @@ impl Parser {
             };
         }
         let end = self.expect(TokenKind::RBracket, "Feldliteral")?.span;
-        Ok(Expr {
-            node: ExprKind::Array(values),
-            span: start.combine(&end),
-        })
+		let span = start.combine(&end);
+		Ok(Expr {
+			node: ExprKind::Array(values),
+			span: start.combine(&end),
+			ty: Ty::default_infer_type(span),
+		})
     }
 
     fn parse_call(&mut self) -> Result<Expr, SyntaxError> {
@@ -609,7 +618,7 @@ impl Parser {
                     let span = start.combine(&name.span);
                     let ident = Ident::new(name.lexeme, name.span);
                     let node = ExprKind::field(expr, ident);
-                    expr = Expr { node, span };
+                    expr = Expr::new(node, span)
                 }
                 _ => break,
             }
@@ -627,21 +636,25 @@ impl Parser {
                 self.expect(TokenKind::Comma, "Argument")?;
             }
         }
-        let paren = self.expect(TokenKind::RParen, "argumente")?;
-        Ok(Expr {
-            span: callee.span.combine(&paren.span),
-            node: ExprKind::call(callee, args),
-        })
+        let end = self.expect(TokenKind::RParen, "argumente")?.span;
+		let span = callee.span.combine(&end);
+		Ok(Expr {
+			span,
+			node: ExprKind::call(callee, args),
+			ty: Ty::default_infer_type(span),
+		})
     }
 
     fn parse_index(&mut self, callee: Expr) -> ParseResult<Expr> {
         let start = self.expect(TokenKind::LBracket, "Feldindex")?.span;
         let index = self.parse_expr()?;
         let end = self.expect(TokenKind::RBracket, "] nach Feldindex")?.span;
-        Ok(Expr {
-            node: ExprKind::index(callee, index),
-            span: start.combine(&end),
-        })
+		let span = start.combine(&end);
+		Ok(Expr {
+			node: ExprKind::index(callee, index),
+			span,
+			ty: Ty::default_infer_type(span),
+		})
     }
 
     fn peek_kind(&mut self) -> Result<TokenKind, SyntaxError> {
