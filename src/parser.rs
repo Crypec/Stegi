@@ -230,7 +230,7 @@ impl Parser {
     }
 
     fn parse_vardef(&mut self) -> ParseResult<Stmt> {
-        let target = self.parse_vardef_target()?;
+        let target: Ident = self.expect(TokenKind::Ident, "Zuweisungsziel")?.into();
         let ty = match self.peek_kind()? {
             TokenKind::ColonEq => {
                 // user has not provided a type, we will try to infer it later during type inference
@@ -258,10 +258,6 @@ impl Parser {
         let local = Local::new(init, target, ty, span);
 
         Ok(Stmt::Local(Box::new(local)))
-    }
-
-    fn parse_vardef_target(&mut self) -> ParseResult<Path> {
-        self.parse_path()
     }
 
     fn parse_expr_stmt(&mut self) -> ParseResult<Stmt> {
@@ -422,9 +418,8 @@ impl Parser {
                 _ => break,
             };
         }
-
-        let first = segments.first().ok_or(SyntaxError::UnexpectedEOF)?.span;
-        let last = segments.last().ok_or(SyntaxError::UnexpectedEOF)?.span;
+        let first = segments.first().unwrap().span;
+        let last = segments.last().unwrap().span;
 
         Ok(Path::new(segments, first.combine(&last)))
     }
@@ -473,40 +468,11 @@ impl Parser {
                     ty: Ty::default_infer_type(span),
                 })
             }
-            _ => self.parse_literal(),
+            _ => self.parse_call(),
         }
     }
 
-    fn parse_literal(&mut self) -> ParseResult<Expr> {
-        match self.peek_kind()? {
-            TokenKind::Literal(lit) => {
-                let span = self.advance()?.span;
-                Ok(Expr {
-                    node: ExprKind::Literal(lit, span),
-                    ty: Ty::default_infer_type(span),
-                    span,
-                })
-            }
-            TokenKind::LParen => self.parse_tup(),
-            TokenKind::RBracket => self.parse_arr(),
-            _ => self.parse_call_or_struct_lit(),
-        }
-    }
-
-    fn parse_call_or_struct_lit(&mut self) -> ParseResult<Expr> {
-        // advance base iterator by 1 position and make sure we leave it in a correct state if we exit
-        self.iter.peek();
-        let res = match self.peek_kind()? {
-            TokenKind::LParen => self.parse_call(),
-            TokenKind::LBrace => self.parse_struct_lit(),
-            _ => panic!("cant parse lit {:#?}", self.peek()),
-        };
-        self.iter.reset_peek();
-        res
-    }
-
-    fn parse_struct_lit(&mut self) -> ParseResult<Expr> {
-        let pat = self.parse_path()?;
+    fn parse_struct_lit(&mut self, pat: Path) -> ParseResult<Expr> {
         self.expect(TokenKind::LBrace, "Offene Klammer nach typenliteral")?;
 
         let mut members = Vec::new();
@@ -550,16 +516,33 @@ impl Parser {
                 let node = ExprKind::This(var, span);
                 Ok(Expr::new(node, span))
             }
-            TokenKind::Ident => {
-                let token = self.advance()?;
-                let var = Variable::new_global(token.lexeme.as_str());
+            TokenKind::Literal(lit) => {
+                let span = self.advance()?.span;
                 Ok(Expr {
-                    node: ExprKind::Variable(var),
-                    span: token.span,
-                    ty: Ty::default_infer_type(token.span),
+                    node: ExprKind::Literal(lit, span),
+                    ty: Ty::default_infer_type(span),
+                    span,
                 })
             }
-            _ => Err(SyntaxError::UnexpectedEOF),
+            TokenKind::LParen => self.parse_tup(),
+            TokenKind::LBracket => self.parse_arr(),
+            TokenKind::Ident => self.parse_primary_ident(),
+            _ => panic!("{:#?}", self.peek()),
+        }
+    }
+
+    fn parse_primary_ident(&mut self) -> ParseResult<Expr> {
+        let pat = self.parse_path()?;
+        match self.peek_kind()? {
+            TokenKind::LBrace => self.parse_struct_lit(pat),
+            _ => {
+                let span = pat.span;
+                Ok(Expr {
+                    node: ExprKind::Path(pat),
+                    span,
+                    ty: Ty::default_infer_type(span),
+                })
+            }
         }
     }
 
