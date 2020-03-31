@@ -153,16 +153,16 @@ pub enum VariantData {
 #[derive(Debug)]
 pub struct Local {
     pub init: Expr,
-    pub pat: Path, // TODO(Simon): this should be a pattern to assign to
+    pub ident: Ident, // TODO(Simon): this should really be a pattern
     pub ty: Option<Ty>,
     pub span: Span,
 }
 
 impl Local {
-    pub fn new(init: Expr, pat: Path, ty: Option<Ty>, span: Span) -> Self {
+    pub fn new(init: Expr, ident: Ident, ty: Option<Ty>, span: Span) -> Self {
         Local {
             init,
-            pat,
+            ident,
             ty,
             span,
         }
@@ -197,6 +197,10 @@ pub struct Path {
 impl Path {
     pub fn new(segments: Vec<Ident>, span: Span) -> Self {
         Path { segments, span }
+    }
+
+    pub fn len(&self) -> usize {
+        self.segments.len()
     }
 }
 
