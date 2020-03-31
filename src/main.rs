@@ -6,6 +6,7 @@ mod ast;
 mod errors;
 mod lexer;
 mod parser;
+mod typer;
 
 #[macro_use]
 extern crate failure;
@@ -17,6 +18,7 @@ use self::ast::*;
 use self::errors::*;
 use self::lexer::*;
 use self::parser::*;
+use self::typer::*;
 
 fn main() {
     let prog = fs::read_to_string("./examples/test.st").expect("failed to read file");
@@ -33,6 +35,7 @@ fn main() {
         Ok(t) => t,
     };
 
-    let asd = Parser::new(tokens).collect::<Result<Vec<Stmt>, SyntaxError>>();
-    println!("{:#?}", asd);
+    // Abstract Syntax Tree
+    let ast = Parser::new(tokens).collect::<Result<Vec<Stmt>, SyntaxError>>();
+    println!("{:#?}", ast);
 }
