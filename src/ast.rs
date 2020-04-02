@@ -473,6 +473,25 @@ pub struct Variable {
     pub function_depth: usize,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct Span {
+    pub lo: usize,
+    pub hi: usize,
+}
+
+impl Span {
+    pub fn new(lo: usize, hi: usize) -> Self {
+        Span { lo, hi }
+    }
+
+    pub fn combine(&self, rhs: &Span) -> Self {
+        Span {
+            lo: std::cmp::min(self.lo, rhs.lo),
+            hi: std::cmp::max(self.hi, rhs.hi),
+        }
+    }
+}
+
 impl Variable {
     pub fn new_local(name: &str) -> Self {
         Variable {

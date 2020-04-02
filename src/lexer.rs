@@ -3,6 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use super::errors::*;
+use crate::ast::Span;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TokenKind {
@@ -240,39 +241,12 @@ impl FromStr for Keyword {
 }
 
 #[derive(Debug, Clone)]
-pub struct Position {
-    pub span: Span,
-    pub line: usize,
-    pub file: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub lexeme: String,
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Span {
-    pub lo: usize,
-    pub hi: usize,
-}
-
-impl Span {
-    pub fn new(lo: usize, hi: usize) -> Self {
-        Span { lo, hi }
-    }
-
-    pub fn combine(&self, rhs: &Span) -> Self {
-        Span {
-            lo: cmp::min(self.lo, rhs.lo),
-            hi: cmp::max(self.hi, rhs.hi),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct Lexer {
     buffer: String,
     cursor: usize,
@@ -280,9 +254,9 @@ pub struct Lexer {
 }
 
 impl Lexer {
-    pub fn new(data: &str) -> Self {
+    pub fn new(data: String) -> Self {
         Lexer {
-            buffer: data.to_string(),
+            buffer: data,
             cursor: 0,
             line: 1,
         }
