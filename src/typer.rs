@@ -31,14 +31,11 @@ pub struct Typer {
 }
 
 impl Visitor for Typer {
-    type Result = Result<Ty, TypeError>;
+    type Result = ();
 
-    fn visit_stmt(&mut self, stmt: &Stmt) -> Self::Result {
-        todo!()
-    }
+    fn visit_stmt(&mut self, stmt: &Stmt) -> Self::Result {}
     fn visit_expr(&mut self, e: &Expr) -> Self::Result {
         infer(&self.ctx.env, &e);
-        Err(TypeError::InvalidType)
     }
 }
 
@@ -47,6 +44,12 @@ impl Typer {
         Self {
             ctx: Context::new(),
         }
+    }
+
+    pub fn infer(&mut self, ast: &mut Vec<Stmt>) {
+        ast.into_iter().for_each(|stmt| {
+            stmt.accept(self);
+        })
     }
 }
 
@@ -60,6 +63,23 @@ impl Context {
         Self {
             next: 0,
             env: Env::new(),
+        }
+    }
+    fn add(&self, name: String, t: Ty) -> Self {
+        let mut new_env = self.env.clone();
+        new_env.insert(name, t);
+        Self {
+            next: self.next,
+            env: new_env,
+        }
+    }
+
+    fn new_id(&mut self) -> Ty {
+        let new_id = self.next;
+        self.next += 1;
+        Ty {
+            kind: TyKind::Infer(new_id),
+            span: Span::new(0, 0),
         }
     }
 }
