@@ -7,7 +7,7 @@ use crate::ast::Span;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TokenKind {
-    Ident,
+    Ident(String),
 
     Keyword(Keyword),
 
@@ -46,7 +46,7 @@ pub enum TokenKind {
 impl fmt::Display for TokenKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let str = match self {
-            TokenKind::Ident => "ident",
+            TokenKind::Ident(id) => id,
             TokenKind::Keyword(kw) => kw.as_str(),
             TokenKind::Comment => "//",
             TokenKind::Literal(l) => l.as_str(),
@@ -243,7 +243,6 @@ impl FromStr for Keyword {
 #[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
-    pub lexeme: String,
     pub span: Span,
 }
 
@@ -396,7 +395,7 @@ impl Lexer {
         let lexeme = self.sub_string(start);
         let len = lexeme.len();
         let span = Span::new(start, (start + len) - 1);
-        Token { kind, lexeme, span }
+        Token { kind, span }
     }
 
     fn sub_string(&mut self, start: usize) -> String {
@@ -438,7 +437,9 @@ impl Lexer {
             .map(TokenKind::Keyword)
             .map_err(|_| str::parse::<Operator>(&lexeme))
             .map_err(|_| str::parse::<Literal>(&lexeme))
-            .unwrap_or(TokenKind::Ident)
+            // FIXME(Simon): this should be fixed, cloning the ident lexeme every time we construct one seems really wasteful,
+            // FIXME(Simon): But I am tired and don't know how to fix this right now
+            .unwrap_or(TokenKind::Ident(lexeme.to_string())) // FIXME(Simon): this should be fixed we don't need to clone the string for every
     }
 
     fn is_at_end(&mut self) -> bool {

@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 use std::iter::*;
 use std::vec::IntoIter;
 
@@ -7,13 +8,15 @@ use itertools::*;
 use super::ast::*;
 use super::errors::*;
 use super::lexer::*;
+use crate::session::*;
 
-pub struct Parser {
+pub struct Parser<'a> {
     iter: MultiPeek<IntoIter<Token>>,
+    sess: &'a mut Session,
 }
 
 macro_rules! __bin_op_rule (
-	($name:ident, $inner:ident, $kind:ident, $($op_pattern:pat)|*) => (
+	($name:ident, $inner:ident, $conv:ty, $kind:ident, $($op_pattern:pat)|*) => (
 		fn $name(&mut self) -> Result<Expr, SyntaxError> {
 			let mut lhs = self.$inner()?;
 			while let Ok(tk) = self.peek_kind() {
@@ -23,8 +26,9 @@ macro_rules! __bin_op_rule (
 				};
 				let rhs = self.$inner()?;
 				let span = lhs.span.combine(&rhs.span);
+				let op: $conv = op.kind.try_into().unwrap();
 				lhs = Expr {
-					node: ExprKind::$kind(lhs, rhs, op.kind),
+					node: ExprKind::$kind(lhs, rhs, op),
 					ty: Ty::default_infer_type(span.clone()),
 					span,
 				};
@@ -36,21 +40,22 @@ macro_rules! __bin_op_rule (
 
 macro_rules! logical_impl (
 	($name:ident, $inner:ident, $($op_pattern:pat)|*) => (
-		__bin_op_rule!($name, $inner, logical, $($op_pattern)|*);
+		__bin_op_rule!($name, $inner, CmpOp, logical, $($op_pattern)|*);
 	);
 );
 macro_rules! binary_impl (
 	($name:ident, $inner:ident, $($op_pattern:pat)|*) => (
-		__bin_op_rule!($name, $inner, binary, $($op_pattern)|*);
+		__bin_op_rule!($name, $inner, BinOp, binary, $($op_pattern)|*);
 	);
 );
 
 type ParseResult<T> = Result<T, SyntaxError>;
 
-impl Parser {
-    pub fn new(i: Vec<Token>) -> Self {
+impl<'a> Parser<'a> {
+    pub fn new(i: Vec<Token>, sess: &'a mut Session) -> Self {
         Parser {
             iter: multipeek(i.into_iter()),
+            sess,
         }
     }
 
@@ -104,14 +109,22 @@ impl Parser {
 
     pub fn parse_fn_header(&mut self) -> ParseResult<FnSig> {
         self.expect(TokenKind::Keyword(Keyword::Fun), "Funktionsdeklaration")?;
-        let name: Ident = self
-            .expect(TokenKind::Ident, "Funktionsschluesselwort")?
-            .into();
+        let span = self.peek()?.span;
+        let mut err = self.sess.span_err(
+            "Parsefehler",
+            "An dieser Stelle haben wir eigentlich ein `;` erwartet, aber ein `!` gefunden.",
+            &span,
+        );
+
+        err.suggest("Versuche an dieser stelle ein Semicolon einzufuegen!");
+
+        println!("{}", err);
+        let name = self.parse_ident()?;
 
         self.expect(TokenKind::LParen, "Funktionsnamen")?;
         let mut params = Vec::new();
         while self.peek_kind()? != TokenKind::RParen {
-            let p_name: Ident = self.expect(TokenKind::Ident, "parameter")?.into();
+            let p_name = self.parse_ident()?;
             self.expect(TokenKind::Colon, "Parametername")?;
             let p_ty = self.parse_ty_specifier()?;
 
@@ -136,7 +149,6 @@ impl Parser {
     pub fn parse_fn_decl(&mut self) -> ParseResult<Stmt> {
         let fn_head = self.parse_fn_header()?;
         let body = self.parse_block(false)?;
-
         Ok(Stmt::FnDecl(FnDecl::new(fn_head, body)))
     }
 
@@ -146,7 +158,7 @@ impl Parser {
         let mut block = Vec::new();
         while self.peek_kind()? != TokenKind::RBrace {
             let stmt = match self.peek_kind()? {
-                TokenKind::Ident => self.parse_expr_stmt_or_vardef()?,
+                TokenKind::Ident(_) => self.parse_vardef()?, // FIXME(Simon): use parse_exprstmt_or_vardef
                 TokenKind::Keyword(Keyword::This) => self.parse_expr_stmt()?,
                 TokenKind::Keyword(Keyword::While) => self.parse_while_loop()?,
                 TokenKind::Keyword(Keyword::For) => self.parse_for_loop()?,
@@ -154,7 +166,7 @@ impl Parser {
                 TokenKind::Keyword(Keyword::Break) => self.parse_break(break_allowed)?,
                 TokenKind::Keyword(Keyword::If) => self.parse_if()?,
                 TokenKind::LBrace => Stmt::Block(self.parse_block(break_allowed)?),
-                _ => todo!(), // report error because of unknown token
+                _ => panic!(format!("invalider token {:#?}", self.peek())), // report error because of unknown token
             };
             block.push(stmt);
         }
@@ -176,7 +188,7 @@ impl Parser {
     fn parse_for_loop(&mut self) -> ParseResult<Stmt> {
         let start = self.expect(TokenKind::Keyword(Keyword::For), "Fuer")?.span;
 
-        let loop_var: Ident = self.expect(TokenKind::Ident, "loopvar")?.into();
+        let loop_var = self.parse_ident()?;
         self.expect(TokenKind::ColonEq, "loop")?;
 
         let it = self.parse_expr()?; // this has to be a range expr like (20..20) or an expr with type array
@@ -230,7 +242,7 @@ impl Parser {
     }
 
     fn parse_vardef(&mut self) -> ParseResult<Stmt> {
-        let target: Ident = self.expect(TokenKind::Ident, "Zuweisungsziel")?.into();
+        let target = self.parse_ident()?;
         let ty = match self.peek_kind()? {
             TokenKind::ColonEq => {
                 // user has not provided a type, we will try to infer it later during type inference
@@ -281,22 +293,21 @@ impl Parser {
     }
 
     pub fn parse_struct_decl(&mut self) -> ParseResult<Stmt> {
-        let start_span = self
+        let start = self
             .expect(TokenKind::Keyword(Keyword::Struct), "TypenDeclaration")?
             .span;
-        let struct_name = self.expect(TokenKind::Ident, "TypenDeclaration")?;
+        let struct_name = self.parse_ident()?;
 
         let mut fields = Vec::new();
 
         self.expect(TokenKind::LBrace, "Typenname")?;
 
         while self.peek_kind()? != TokenKind::RBrace {
-            let name = self.expect(TokenKind::Ident, "Feldname")?;
+            let name = self.parse_ident()?;
             self.expect(TokenKind::Colon, "feldname")?;
             let ty = self.parse_ty_specifier()?;
 
             let span = name.span.combine(&ty.span);
-            let name = Ident::new(name.lexeme, name.span);
             fields.push(Field::new(name, ty, span));
 
             match self.peek_kind()? {
@@ -304,12 +315,11 @@ impl Parser {
                 _ => self.expect(TokenKind::Comma, "feld")?,
             };
         }
-        let end_span = self.expect(TokenKind::RBrace, "TypenDeclaration")?.span;
-        let struct_name = Ident::new(struct_name.lexeme, struct_name.span);
+        let end = self.expect(TokenKind::RBrace, "TypenDeclaration")?.span;
         Ok(Stmt::StructDecl(StructDecl {
             name: struct_name,
             fields,
-            span: start_span.combine(&end_span),
+            span: start.combine(&end),
         }))
     }
 
@@ -320,7 +330,7 @@ impl Parser {
                 "enum or struct declaration",
             )?
             .span;
-        let name: Ident = self.expect(TokenKind::Ident, "Enum Name")?.into();
+        let name = self.parse_ident()?;
         self.expect(TokenKind::Eq, "EnumDecl")?;
         let mut variants = Vec::new();
         loop {
@@ -336,7 +346,7 @@ impl Parser {
 
     fn parse_enum_variant(&mut self) -> ParseResult<Variant> {
         let start = self.expect(TokenKind::Sep, "enum variante")?.span;
-        let ident: Ident = self.expect(TokenKind::Ident, "Feldname")?.into();
+        let ident = self.parse_ident()?;
         let (data, end) = match self.peek_kind()? {
             TokenKind::LParen => {
                 self.advance()?;
@@ -383,7 +393,7 @@ impl Parser {
                 self.expect(TokenKind::RParen, "Tuple")?;
                 Ok(TyKind::Tup(elems))
             }
-            TokenKind::Ident => {
+            TokenKind::Ident(_) => {
                 let path = self.parse_path()?;
                 Ok(TyKind::Path(path))
             }
@@ -407,9 +417,9 @@ impl Parser {
     fn parse_path(&mut self) -> ParseResult<Path> {
         let mut segments = Vec::new();
 
-        while self.peek_kind()? == TokenKind::Ident {
-            let t = self.advance()?;
-            segments.push(Ident::new(t.lexeme, t.span));
+        while let TokenKind::Ident(_) = self.peek_kind()? {
+            let frag = self.parse_ident()?;
+            segments.push(frag);
 
             match self.peek_kind()? {
                 TokenKind::PathSep => {
@@ -463,7 +473,7 @@ impl Parser {
                 let rhs = self.parse_unary()?;
                 let span = op.span.combine(&rhs.span);
                 Ok(Expr {
-                    node: ExprKind::unary(rhs, op.kind),
+                    node: ExprKind::unary(rhs, op.kind.try_into().unwrap()),
                     span: span.clone(),
                     ty: Ty::default_infer_type(span),
                 })
@@ -477,15 +487,15 @@ impl Parser {
 
         let mut members = Vec::new();
         while self.peek_kind()? != TokenKind::RBrace {
-            let ident: Ident = self.expect(TokenKind::Ident, "feldname")?.into();
+            let name = self.parse_ident()?;
             self.expect(
                 TokenKind::Colon,
                 ": Seperator zwischen feldname und init Ausdruck",
             )?;
             let expr = self.parse_expr()?;
 
-            let span = ident.span.combine(&expr.span);
-            let member = Member::new(ident, expr, span);
+            let span = name.span.combine(&expr.span);
+            let member = Member::new(name, expr, span);
             members.push(member);
 
             match self.peek_kind()? {
@@ -526,7 +536,7 @@ impl Parser {
             }
             TokenKind::LParen => self.parse_tup(),
             TokenKind::LBracket => self.parse_arr(),
-            TokenKind::Ident => self.parse_primary_ident(),
+            TokenKind::Ident(_) => self.parse_primary_ident(),
             _ => panic!("{:#?}", self.peek()),
         }
     }
@@ -599,8 +609,7 @@ impl Parser {
                     let start = self.advance()?.span;
                     let name = self.advance()?;
                     let span = start.combine(&name.span);
-                    let ident = Ident::new(name.lexeme, name.span);
-                    let node = ExprKind::field(expr, ident);
+                    let node = ExprKind::field(expr, self.parse_ident()?);
                     expr = Expr::new(node, span)
                 }
                 _ => break,
@@ -640,6 +649,13 @@ impl Parser {
         })
     }
 
+    fn parse_ident(&mut self) -> ParseResult<Ident> {
+        match self.peek_kind()? {
+            TokenKind::Ident(_) => Ok(self.advance()?.try_into().unwrap()),
+            _ => Err(SyntaxError::UnexpectedEOF),
+        }
+    }
+
     fn peek_kind(&mut self) -> Result<TokenKind, SyntaxError> {
         // maybe we can remove this clone, although I doubt it because of the string fields
         let item = match self.iter.peek() {
@@ -675,7 +691,7 @@ impl Parser {
     }
 }
 
-impl Iterator for Parser {
+impl Iterator for Parser<'_> {
     type Item = ParseResult<Stmt>;
 
     fn next(&mut self) -> Option<Self::Item> {
