@@ -34,10 +34,10 @@ impl Driver {
             .unwrap()
             .read_from_fs()
             .expect("failed to read file");
-
         let t_stream = Lexer::new(file_str)
             .collect::<Result<Vec<Token>, SyntaxError>>()
             .expect("failed to tokenize file");
+        dbg!(&t_stream);
         let mut ast = Parser::new(t_stream, &mut self.sess)
             .collect::<Vec<Result<Stmt, SyntaxError>>>()
             .into_iter()
@@ -77,11 +77,11 @@ impl Session {
         }
     }
 
-    pub fn span_err(&mut self, desc: &'static str, msg: &'static str, span: &Span) -> Error {
+    pub fn span_err(&mut self, desc: &'static str, msg: &'static str, span: &Span) -> Diagnostic {
         self.had_err = true;
-        Error {
-            desc,
-            msg,
+        Diagnostic {
+            desc: desc.into(),
+            msg: msg.into(),
             suggestions: Vec::new(),
             span: *span,
             severity: Severity::Fatal,
