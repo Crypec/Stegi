@@ -1,4 +1,6 @@
 use super::lexer::*;
+use crate::errors::*;
+use std::convert::TryFrom;
 
 pub trait ASTNode {
     fn accept<V: Visitor>(&mut self, visitor: &mut V) -> V::Result;
@@ -231,11 +233,16 @@ pub struct Ident {
     pub span: Span,
 }
 
-impl From<Token> for Ident {
-    fn from(item: Token) -> Self {
-        Ident {
-            name: item.lexeme,
-            span: item.span,
+impl TryFrom<Token> for Ident {
+    // TODO(Simon): this does not seem right, we should clean this up to use some internal error type for fatal compiler errors
+    type Error = String;
+    fn try_from(t: Token) -> Result<Ident, Self::Error> {
+        match t.kind {
+            TokenKind::Ident(name) => Ok(Ident::new(name.to_owned(), t.span)),
+            _ => Err(format!(
+                "token konnte nicht in ident umgewandelt werden: {:#?}",
+                t
+            )),
         }
     }
 }
@@ -359,14 +366,14 @@ impl Block {
 }
 
 impl ExprKind {
-    pub fn binary(lhs: Expr, rhs: Expr, op: TokenKind) -> Self {
+    pub fn binary(lhs: Expr, rhs: Expr, op: BinOp) -> Self {
         ExprKind::Binary(Binary {
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
             op,
         })
     }
-    pub fn logical(lhs: Expr, rhs: Expr, op: TokenKind) -> Self {
+    pub fn logical(lhs: Expr, rhs: Expr, op: CmpOp) -> Self {
         ExprKind::Logical(Logical {
             lhs: Box::new(lhs),
             rhs: Box::new(rhs),
@@ -374,7 +381,7 @@ impl ExprKind {
         })
     }
 
-    pub fn unary(rhs: Expr, op: TokenKind) -> Self {
+    pub fn unary(rhs: Expr, op: UnaryOp) -> Self {
         ExprKind::Unary(Unary {
             rhs: Box::new(rhs),
             op,
@@ -444,20 +451,97 @@ impl Expr {
 pub struct Binary {
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
-    pub op: TokenKind,
+    pub op: BinOp,
+}
+
+#[derive(Debug)]
+pub enum BinOp {
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+}
+
+impl TryFrom<TokenKind> for BinOp {
+    type Error = String;
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        match value {
+            TokenKind::Operator(Operator::Plus) => Ok(BinOp::Plus),
+            TokenKind::Operator(Operator::Minus) => Ok(BinOp::Minus),
+            TokenKind::Operator(Operator::Star) => Ok(BinOp::Multiply),
+            TokenKind::Operator(Operator::Slash) => Ok(BinOp::Divide),
+            _ => Err(format!(
+                "nicht erlaubte umwandlung in bin op token {}",
+                value
+            )),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum CmpOp {
+    EqEq,
+    NotEq,
+    Greater,
+    GreaterEq,
+    Less,
+    LessEq,
+}
+
+impl TryFrom<TokenKind> for CmpOp {
+    type Error = String;
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        match value {
+            TokenKind::Operator(Operator::EqEq) => Ok(CmpOp::EqEq),
+            TokenKind::Operator(Operator::NotEq) => Ok(CmpOp::NotEq),
+            TokenKind::Operator(Operator::Greater) => Ok(CmpOp::Greater),
+            TokenKind::Operator(Operator::GreaterEq) => Ok(CmpOp::GreaterEq),
+            TokenKind::Operator(Operator::Less) => Ok(CmpOp::LessEq),
+            TokenKind::Operator(Operator::LessEq) => Ok(CmpOp::LessEq),
+            _ => Err(format!(
+                "nicht erlaubte umwandlung in cmp op token {}",
+                value
+            )),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct Unary {
     pub rhs: Box<Expr>,
-    pub op: TokenKind,
+    pub op: UnaryOp,
+}
+
+// NOTE(Simon): I don't know how the parser is going to handle +10 with the current grammar rules
+// NOTE(Simon): maybe we need to include plus
+#[derive(Debug)]
+pub enum UnaryOp {
+    Minus,
+    Not,
+}
+
+impl TryFrom<TokenKind> for UnaryOp {
+    type Error = String;
+
+    fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
+        match value {
+            TokenKind::Operator(Operator::Not) => Ok(UnaryOp::Not),
+            TokenKind::Operator(Operator::Minus) => Ok(UnaryOp::Minus),
+            _ => Err(format!(
+                "nicht erlaubte umwandlung in cmp op token {}",
+                value
+            )),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct Logical {
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
-    pub op: TokenKind,
+    pub op: CmpOp,
 }
 
 #[derive(Debug)]
