@@ -41,18 +41,19 @@ pub enum TypeError {
 pub enum Severity {
     Warning,
     Fatal,
+    CodeRed, // Reserved for only the highest severity alarms, this means we fucked something up :D
 }
 
-pub struct Error<'a> {
-    pub msg: &'static str,
-    pub desc: &'static str,
+pub struct Diagnostic<'a> {
+    pub msg: String,
+    pub desc: String,
     pub suggestions: Vec<String>,
     pub severity: Severity,
     pub span: Span,
     pub src: &'a SourceMap,
 }
 
-impl Error<'_> {
+impl Diagnostic<'_> {
     fn line_number(&self) -> usize {
         // FIXME(Simon): I haven't tested this, but it seems like this is going to work only on linux with the current solution
         // FIXME(Simon): because windows uses not only a '\n' as a newline char but combines it with a '\r'
@@ -69,8 +70,9 @@ impl Error<'_> {
         let (lo, _) = src
             .char_indices()
             .filter(|(_, c)| *c == '\n')
-            .nth(self.line_number() - 1)
+            .nth(self.line_number())
             .unwrap();
+        dbg!(self.line_span());
         let (hi, _) = src
             .char_indices()
             .skip(lo + 1)
@@ -92,7 +94,9 @@ impl Error<'_> {
     fn underline(&self) -> String {
         let line_span = self.line_span();
         let file = fs::read_to_string(&self.src.path).unwrap();
-        let buf_len = self.span.lo - line_span.lo - 1;
+        dbg!(line_span);
+        dbg!(self.span);
+        let buf_len = self.span.lo - line_span.lo;
         let buf = (0..buf_len).map(|_| " ").collect::<String>();
         let under = (0..self.span.hi - self.span.lo + 1)
             .map(|_| "^".red().bold().to_string())
@@ -112,7 +116,7 @@ impl Error<'_> {
     }
 }
 
-impl fmt::Display for Error<'_> {
+impl fmt::Display for Diagnostic<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let header = format!(
             "-- {} --------------------------------------- [{}:{}:{}]",
