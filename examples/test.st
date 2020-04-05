@@ -1,9 +1,4 @@
-
-
-
-
 fun start() -> () {
-	a := Mathe::Zahl {
-	  	 name: path::path,
-	};
+	a := 20;
+	b := 20 + 3;
 }
