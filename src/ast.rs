@@ -1,5 +1,4 @@
 use super::lexer::*;
-use crate::errors::*;
 use std::convert::TryFrom;
 
 pub trait ASTNode {
@@ -9,8 +8,8 @@ pub trait ASTNode {
 pub trait Visitor {
     type Result;
 
-    fn visit_stmt(&mut self, stmt: &Stmt) -> Self::Result;
-    fn visit_expr(&mut self, expr: &Expr) -> Self::Result;
+    fn visit_stmt(&mut self, stmt: &mut Stmt) -> Self::Result;
+    fn visit_expr(&mut self, expr: &mut Expr) -> Self::Result;
 }
 
 #[derive(Derivative)]
@@ -92,8 +91,6 @@ pub enum Stmt {
     #[derivative(Debug = "transparent")]
     Local(Box<Local>),
 
-    Var(Variable, Expr),
-
     #[derivative(Debug = "transparent")]
     EnumDecl(EnumDecl),
 
@@ -154,14 +151,14 @@ pub enum VariantData {
 
 #[derive(Debug)]
 pub struct Local {
-    pub init: Expr,
     pub ident: Ident, // TODO(Simon): this should really be a pattern
-    pub ty: Option<Ty>,
+    pub init: Expr,
+    pub ty: Ty,
     pub span: Span,
 }
 
 impl Local {
-    pub fn new(init: Expr, ident: Ident, ty: Option<Ty>, span: Span) -> Self {
+    pub fn new(init: Expr, ident: Ident, ty: Ty, span: Span) -> Self {
         Local {
             init,
             ident,
@@ -267,6 +264,10 @@ pub enum TyKind {
     #[derivative(Debug = "transparent")]
     Array(Box<TyKind>),
 
+    Struct(Path),
+
+    Enum(Path),
+
     #[derivative(Debug = "transparent")]
     Tup(Vec<TyKind>),
 
@@ -283,10 +284,25 @@ pub enum TyKind {
     Path(Path),
 }
 
+impl Default for TyKind {
+    fn default() -> Self {
+        TyKind::Tup(Vec::new())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Ty {
     pub kind: TyKind,
     pub span: Span,
+}
+
+impl Default for Ty {
+    fn default() -> Self {
+        Self {
+            kind: TyKind::default(),
+            span: Span::default(),
+        }
+    }
 }
 
 impl Ty {
@@ -561,6 +577,12 @@ pub struct Variable {
 pub struct Span {
     pub lo: usize,
     pub hi: usize,
+}
+
+impl Default for Span {
+    fn default() -> Self {
+        Self { lo: 0, hi: 0 }
+    }
 }
 
 impl Span {
