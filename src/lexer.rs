@@ -1,4 +1,3 @@
-use std::cmp;
 use std::fmt;
 use std::str::FromStr;
 
@@ -246,14 +245,14 @@ pub struct Token {
     pub span: Span,
 }
 
-pub struct Lexer {
-    buffer: String,
+pub struct Lexer<'a> {
+    buffer: &'a String,
     cursor: usize,
     line: usize,
 }
 
-impl Lexer {
-    pub fn new(data: String) -> Self {
+impl<'a> Lexer<'a> {
+    pub fn new(data: &'a String) -> Self {
         Lexer {
             buffer: data,
             cursor: 0,
@@ -437,9 +436,7 @@ impl Lexer {
             .map(TokenKind::Keyword)
             .map_err(|_| str::parse::<Operator>(&lexeme))
             .map_err(|_| str::parse::<Literal>(&lexeme))
-            // FIXME(Simon): this should be fixed, cloning the ident lexeme every time we construct one seems really wasteful,
-            // FIXME(Simon): But I am tired and don't know how to fix this right now
-            .unwrap_or(TokenKind::Ident(lexeme.to_string())) // FIXME(Simon): this should be fixed we don't need to clone the string for every
+            .unwrap_or(TokenKind::Ident(lexeme.clone()))
     }
 
     fn is_at_end(&mut self) -> bool {
@@ -447,7 +444,7 @@ impl Lexer {
     }
 }
 
-impl Iterator for Lexer {
+impl Iterator for Lexer<'_> {
     type Item = Result<Token, SyntaxError>;
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(item) = self.scan_token() {
