@@ -1,5 +1,7 @@
+use std::cell::RefCell;
 use std::convert::TryInto;
 use std::iter::*;
+use std::rc::Rc;
 use std::vec::IntoIter;
 
 use itertools::multipeek;
@@ -10,9 +12,9 @@ use super::errors::*;
 use super::lexer::*;
 use crate::session::*;
 
-pub struct Parser<'a> {
+pub struct Parser {
     iter: MultiPeek<IntoIter<Token>>,
-    sess: &'a mut Session,
+    sess: Rc<RefCell<Session>>,
 }
 
 macro_rules! __bin_op_rule (
@@ -51,8 +53,8 @@ macro_rules! binary_impl (
 
 type ParseResult<T> = Result<T, SyntaxError>;
 
-impl<'a> Parser<'a> {
-    pub fn new(i: Vec<Token>, sess: &'a mut Session) -> Self {
+impl Parser {
+    pub fn new(i: Vec<Token>, sess: Rc<RefCell<Session>>) -> Self {
         Parser {
             iter: multipeek(i.into_iter()),
             sess,
@@ -109,18 +111,8 @@ impl<'a> Parser<'a> {
 
     pub fn parse_fn_header(&mut self) -> ParseResult<FnSig> {
         self.expect(TokenKind::Keyword(Keyword::Fun), "Funktionsdeklaration")?;
-        let span = self.peek()?.span;
-        let mut err = self.sess.span_err(
-            "Parsefehler",
-            "An dieser Stelle haben wir eigentlich ein `;` erwartet, aber ein `!` gefunden.",
-            &span,
-        );
 
-        err.suggest("Versuche an dieser stelle ein Semicolon einzufuegen!");
-
-        println!("{}", err);
         let name = self.parse_ident()?;
-
         self.expect(TokenKind::LParen, "Funktionsnamen")?;
         let mut params = Vec::new();
         while self.peek_kind()? != TokenKind::RParen {
@@ -246,13 +238,13 @@ impl<'a> Parser<'a> {
         let ty = match self.peek_kind()? {
             TokenKind::ColonEq => {
                 // user has not provided a type, we will try to infer it later during type inference
-                self.advance()?;
-                None
+                let infer_span = self.advance()?.span;
+                Ty::default_infer_type(infer_span)
             }
             TokenKind::Colon => {
                 // user has provided a concrete type, we will validate during type anlysis
                 self.advance()?;
-                Some(self.parse_ty_specifier()?)
+                self.parse_ty_specifier()?
             }
             _ => {
                 eprintln!("failed to parse vardef type");
@@ -691,7 +683,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-impl Iterator for Parser<'_> {
+impl Iterator for Parser {
     type Item = ParseResult<Stmt>;
 
     fn next(&mut self) -> Option<Self::Item> {
