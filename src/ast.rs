@@ -109,6 +109,12 @@ pub enum Stmt {
     #[derivative(Debug = "transparent")]
     FnDecl(FnDecl),
 
+    ImplBlock {
+        target: Path,
+        fn_decls: Vec<FnDecl>,
+        span: Span,
+    },
+
     #[derivative(Debug = "transparent")]
     StructDecl(StructDecl),
 }
