@@ -12,14 +12,25 @@ use super::errors::*;
 use super::lexer::*;
 use crate::session::*;
 
+type ParseResult<T> = Result<T, Diagnostic>;
+
 pub struct Parser {
     iter: MultiPeek<IntoIter<Token>>,
     sess: Rc<RefCell<Session>>,
+    last: Option<Token>,
+}
+
+/// `FnParsingMode` tells the `parse_fn_decl()` if we are allowed to have a `self` param in the function signature.
+/// If we parse an associated function in an impl Block, we pass the type which the impl block implements as an value
+/// in Method. During fn_signature_parsing the `self` param get's desuggared into a normal function parameter
+enum FnParsingMode {
+    Method(Path),
+    Function,
 }
 
 macro_rules! __bin_op_rule (
 	($name:ident, $inner:ident, $conv:ty, $kind:ident, $($op_pattern:pat)|*) => (
-		fn $name(&mut self) -> Result<Expr, SyntaxError> {
+		fn $name(&mut self) -> ParseResult<Expr> {
 			let mut lhs = self.$inner()?;
 			while let Ok(tk) = self.peek_kind() {
 				let op = match tk {
@@ -51,13 +62,15 @@ macro_rules! binary_impl (
 	);
 );
 
-type ParseResult<T> = Result<T, SyntaxError>;
-
 impl Parser {
     pub fn new(i: Vec<Token>, sess: Rc<RefCell<Session>>) -> Self {
+        let last = i.last().cloned();
         Parser {
             iter: multipeek(i.into_iter()),
             sess,
+            // NOTE(Simon): this only gets used for error reporting if we unexpectedly reach the end of a file
+            // NOTE(Simon): this could be `None`, but in this we don't ever try to parse anything beecause `has_next` in our iter implementation will return false and we will stop parsing
+            last,
         }
     }
 
@@ -74,6 +87,7 @@ impl Parser {
                 | TokenKind::Keyword(Keyword::If)
                 | TokenKind::Keyword(Keyword::While)
                 | TokenKind::Keyword(Keyword::Return)
+                | TokenKind::Keyword(Keyword::Impl)
                 | TokenKind::EOF => return,
                 _ => self.advance().unwrap(),
             };
@@ -87,9 +101,13 @@ impl Parser {
     fn parse_decl(&mut self) -> ParseResult<Stmt> {
         match self.peek_kind()? {
             TokenKind::Keyword(Keyword::Struct) => self.parse_ty_decl(),
-            TokenKind::Keyword(Keyword::Fun) => self.parse_fn_decl(),
+            TokenKind::Keyword(Keyword::Fun) => self.parse_fn_decl(FnParsingMode::Function),
             TokenKind::Keyword(Keyword::Impl) => self.parse_impl_block(),
-            _ => panic!("invalide declaration {:#?}", self.peek()),
+            // FIXME
+            _ => {
+                let sp = self.peek()?.span;
+                Err(self.span_err("An dieser Stelle haben wir einen der folgenden Woerter erwartet: `fun`, `typ`, `implementiere`.", &sp))
+            }
         }
     }
 
@@ -109,12 +127,32 @@ impl Parser {
         }
     }
 
-    pub fn parse_fn_header(&mut self) -> ParseResult<FnSig> {
+    fn parse_fn_header(&mut self, parse_mode: FnParsingMode) -> ParseResult<FnSig> {
         self.expect(TokenKind::Keyword(Keyword::Fun), "Funktionsdeklaration")?;
 
         let name = self.parse_ident()?;
         self.expect(TokenKind::LParen, "Funktionsnamen")?;
+
         let mut params = Vec::new();
+
+        match parse_mode {
+            FnParsingMode::Method(p) => {
+                if self.peek_kind()? == TokenKind::Keyword(Keyword::This) {
+                    let self_ty = Ty::new(TyKind::Path(p.clone()), p.span);
+                    params.push((Ident::new("selbst".into(), p.span), self_ty));
+
+                    if self.peek_kind()? != TokenKind::RParen {
+                        self.expect(TokenKind::Comma, "Nach dem `selbst` Parameter und den restlichen Parameter der Funktion haben wir ein Komma erwartet!")?;
+                    }
+                }
+            }
+            FnParsingMode::Function => {
+                if self.peek_kind()? == TokenKind::Keyword(Keyword::This) {
+                    let sp = self.peek()?.span;
+                    return Err(self.span_err("Mit dem `selbst` Parameter kannst du Werte eines Objekts aendern. Dafuer muss die Function, die jetzt 'Methode' heisst, in einem impl Block stehen. Der `selbst` Paramter muss immer der erste Parameter einer 'Methode sein. Seinen Datentyp brauchst du nicht festzulegen. Er steht durch den `impl block` fest!'", &sp));
+                }
+            }
+        }
         while self.peek_kind()? != TokenKind::RParen {
             let p_name = self.parse_ident()?;
             self.expect(TokenKind::Colon, "Parametername")?;
@@ -138,8 +176,8 @@ impl Parser {
         Ok(FnSig::new(name, params, ret_ty))
     }
 
-    pub fn parse_fn_decl(&mut self) -> ParseResult<Stmt> {
-        let fn_head = self.parse_fn_header()?;
+    fn parse_fn_decl(&mut self, parse_mode: FnParsingMode) -> ParseResult<Stmt> {
+        let fn_head = self.parse_fn_header(parse_mode)?;
         let body = self.parse_block(false)?;
         Ok(Stmt::FnDecl(FnDecl::new(fn_head, body)))
     }
@@ -158,7 +196,7 @@ impl Parser {
                 TokenKind::Keyword(Keyword::Break) => self.parse_break(break_allowed)?,
                 TokenKind::Keyword(Keyword::If) => self.parse_if()?,
                 TokenKind::LBrace => Stmt::Block(self.parse_block(break_allowed)?),
-                _ => panic!(format!("invalider token {:#?}", self.peek())), // report error because of unknown token
+                _ => panic!(format!("invalider token {:#?}", self.peek())), // report error because of unknown token and take EOF token into considuration
             };
             block.push(stmt);
         }
@@ -247,8 +285,14 @@ impl Parser {
                 self.parse_ty_specifier()?
             }
             _ => {
-                eprintln!("failed to parse vardef type");
-                return Err(SyntaxError::UnexpectedEOF);
+                let pk = self.peek()?;
+                return Err(self.span_err(
+                    format!(
+                        "Invalides Zeichen: `{}` in Zuweisungsziel gefunden!",
+                        pk.kind
+                    ),
+                    &pk.span,
+                ));
             }
         };
 
@@ -272,7 +316,11 @@ impl Parser {
 
     fn parse_break(&mut self, break_allowed: bool) -> ParseResult<Stmt> {
         if !break_allowed {
-            return Err(SyntaxError::BreakOutsideLoop);
+            let sp = self.advance()?.span;
+            return Err(self.span_err(
+                "Der`stop` Befehl ist nur im Koerper von Schleifen erlaubt",
+                &sp,
+            ));
         }
 
         self.expect(TokenKind::Keyword(Keyword::Break), "Stop befehl")?;
@@ -281,7 +329,43 @@ impl Parser {
     }
 
     fn parse_impl_block(&mut self) -> ParseResult<Stmt> {
-        todo!()
+        let start = self
+            .expect(
+                TokenKind::Keyword(Keyword::Impl),
+                "An dieser Stelle haben wir das Impl Schluesselwort erwartet!",
+            )?
+            .span;
+
+        let impl_target = self.parse_path()?; // FIXME(Simon): we should expect a path here to impl structs from other modules
+        self.expect(
+            TokenKind::LBrace,
+            "An dieser Stelle haben wir eine oeffnende Klammer: `{` erwartet",
+        )?;
+
+        let mut fn_decls = Vec::new();
+        while self.peek_kind()? != TokenKind::RBrace {
+            let p_mode = FnParsingMode::Method(impl_target.clone());
+            fn_decls.push(self.parse_fn_decl(p_mode)?);
+        }
+
+        let end = self
+            .expect(
+                TokenKind::RBrace,
+                "An dieser Stelle haben wir eine schliessende Klammer: `}` erwartet",
+            )?
+            .span;
+        let fn_decls = fn_decls
+            .into_iter()
+            .map(|s| match s {
+                Stmt::FnDecl(f) => f,
+                _ => unreachable!(),
+            })
+            .collect();
+        Ok(Stmt::ImplBlock {
+            target: impl_target,
+            fn_decls: fn_decls,
+            span: start.combine(&end),
+        })
     }
 
     pub fn parse_struct_decl(&mut self) -> ParseResult<Stmt> {
@@ -390,8 +474,11 @@ impl Parser {
                 Ok(TyKind::Path(path))
             }
             _ => {
-                println!("failed to parse type");
-                Err(SyntaxError::UnexpectedEOF)
+                let sp = self.peek()?.span;
+                Err(self.span_err(
+                    "An dieser Stelle habe ich einen Datentypkennzeichner erwartet",
+                    &sp,
+                ))
             }
         }
     }
@@ -454,7 +541,7 @@ impl Parser {
         parse_unary,
         TokenKind::Operator(Operator::Slash) | TokenKind::Operator(Operator::Star)
     );
-    pub fn parse_expr(&mut self) -> Result<Expr, SyntaxError> {
+    pub fn parse_expr(&mut self) -> ParseResult<Expr> {
         self.parse_and()
     }
 
@@ -510,7 +597,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_primary(&mut self) -> Result<Expr, SyntaxError> {
+    fn parse_primary(&mut self) -> ParseResult<Expr> {
         match self.peek_kind()? {
             TokenKind::Keyword(Keyword::This) => {
                 let var = Variable::new_local("selbst");
@@ -586,7 +673,7 @@ impl Parser {
         })
     }
 
-    fn parse_call(&mut self) -> Result<Expr, SyntaxError> {
+    fn parse_call(&mut self) -> ParseResult<Expr> {
         let mut expr = self.parse_primary()?;
         loop {
             match self.peek_kind()? {
@@ -610,7 +697,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn finish_call(&mut self, callee: Expr) -> Result<Expr, SyntaxError> {
+    fn finish_call(&mut self, callee: Expr) -> ParseResult<Expr> {
         let mut args = Vec::new();
         while self.peek_kind()? != TokenKind::RParen {
             args.push(self.parse_expr()?);
@@ -644,11 +731,17 @@ impl Parser {
     fn parse_ident(&mut self) -> ParseResult<Ident> {
         match self.peek_kind()? {
             TokenKind::Ident(_) => Ok(self.advance()?.try_into().unwrap()),
-            _ => Err(SyntaxError::UnexpectedEOF),
+            _ => {
+                let sp = self.peek()?.span;
+                Err(self.span_err(
+                    "An dieser Stelle habe ich eigentlich einen `Bezeichner` erwartet",
+                    &sp,
+                ))
+            }
         }
     }
 
-    fn peek_kind(&mut self) -> Result<TokenKind, SyntaxError> {
+    fn peek_kind(&mut self) -> ParseResult<TokenKind> {
         // maybe we can remove this clone, although I doubt it because of the string fields
         let item = match self.iter.peek() {
             Some(t) => Ok(t.kind.clone()),
@@ -659,13 +752,28 @@ impl Parser {
     }
 
     fn peek(&mut self) -> ParseResult<Token> {
-        let elem = self.iter.peek().cloned().ok_or(SyntaxError::UnexpectedEOF);
+        let sp = self.last.as_ref().unwrap().span;
+
+        let elem = self
+            .iter
+            .peek()
+            .cloned()
+            .ok_or(self.span_err("Wir haben unerwartet das Ende der Datei erreicht!", &sp));
         self.iter.reset_peek();
         elem
     }
 
-    fn advance(&mut self) -> Result<Token, SyntaxError> {
-        self.iter.next().ok_or(SyntaxError::UnexpectedEOF)
+    fn advance(&mut self) -> ParseResult<Token> {
+        match self.iter.next() {
+            Some(t) => {
+                self.last = Some(t.clone());
+                Ok(t.clone())
+            }
+            None => Err(self.span_err(
+                "Ich habe unerwartet das Ende der Datei erreicht!",
+                &self.last.as_ref().unwrap().span,
+            )),
+        }
     }
 
     fn has_next(&mut self) -> bool {
@@ -674,12 +782,19 @@ impl Parser {
         res
     }
 
-    fn expect(&mut self, expected: TokenKind, before: &'static str) -> ParseResult<Token> {
+    fn expect<S: Into<String>>(&mut self, expected: TokenKind, msg: S) -> ParseResult<Token> {
         if self.peek_kind()? == expected {
             self.advance()
         } else {
-            Err(SyntaxError::Missing(expected.to_string(), before))
+            let sp = self.peek()?.span;
+            Err(self.span_err(msg, &sp))
         }
+    }
+
+    fn span_err<S: Into<String>>(&self, msg: S, span: &Span) -> Diagnostic {
+        self.sess
+            .borrow_mut()
+            .span_err("Fehler beim Parsen", &msg.into(), span)
     }
 }
 
@@ -689,6 +804,9 @@ impl Iterator for Parser {
     fn next(&mut self) -> Option<Self::Item> {
         if self.has_next() {
             let test = self.parse();
+            if test.is_err() {
+                self.sync_parser_state();
+            }
             Some(test)
         } else {
             None
