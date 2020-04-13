@@ -79,20 +79,25 @@ impl Diagnostic {
         println!("{}", self);
     }
 
+    pub fn suggest<S: Into<String>>(&mut self, suggestion: S) {
+        self.suggestions.push(suggestion.into());
+    }
+
     fn line_num(&self) -> usize {
         self.src
             .upgrade()
             .unwrap()
             .buf
-            .chars()
-            .filter(|c| *c == '\n')
-            .count()
+            .char_indices()
+            .filter(|(_, c)| *c == '\n')
+            .position(|(i, _)| i >= self.span.lo)
+            .expect("failed to compute line number of err")
+            + 1
     }
 
     fn underline(&self) -> String {
-        let line_span = self.line_span();
-        let buf_len = line_span.hi - self.span.lo;
-        (1..buf_len).map(|_| "^").collect::<String>()
+        let buf_len = self.span.hi - self.span.lo;
+        (0..=buf_len).map(|_| "^").collect::<String>()
     }
 
     fn span_snippet(&self) -> String {
@@ -103,15 +108,17 @@ impl Diagnostic {
     }
 
     fn line_span(&self) -> Span {
+        let ref src_buf = self
+            .src
+            .upgrade()
+            .expect("Failed to get parent ptr to src map")
+            .buf;
+
         // FIXME(Simon): I haven't tested this, but it seems like this is going to work only on linux with the current solution
         // FIXME(Simon): because windows uses not only a '\n' as a newline char but combines it with a '\r'
         let mut line_offsets = vec![0];
         line_offsets.extend(
-            &self
-                .src
-                .upgrade()
-                .unwrap()
-                .buf
+            src_buf
                 .char_indices()
                 .filter(|(_, c)| *c == '\n')
                 .map(|(i, _)| i)
@@ -131,8 +138,38 @@ impl Diagnostic {
             }
         }
         let hi = it.next().unwrap();
-        // we add 1 to the low marker of the line span to skip the `\n = newline` char
-        Span::new(lo + 1, hi)
+        let (lo, _) = src_buf
+            .char_indices()
+            .skip(lo)
+            .find(|(_, c)| !c.is_whitespace())
+            .unwrap();
+        Span::new(lo, hi)
+    }
+
+    fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
+        let line_str = format!(" {} |", self.line_num());
+
+        let align = line_str.len();
+        let u_line = self.underline();
+
+        writeln!(f, "{:>a$}", "|", a = align)?;
+        writeln!(f, "{} {}", line_str, self.span_snippet())?;
+        writeln!(
+            f,
+            "{:>a$} {:>u$}",
+            "|",
+            u_line.color(c).bold(),
+            a = align,
+            u = self.span.lo - self.line_span().lo + u_line.len()
+        )?;
+        writeln!(
+            f,
+            "{:>a$} {}: {}",
+            "|",
+            "Hilfe".bold().underline(),
+            self.msg,
+            a = align
+        )
     }
 }
 
@@ -152,33 +189,17 @@ impl fmt::Display for Diagnostic {
             self.src.upgrade().unwrap().path.to_str().unwrap().blue()
         )?;
         writeln!(f)?;
-        let line = self.line_num().to_string();
-        let front_pad = line.chars().count() + 2;
-        let bar = "|".bold();
-        writeln!(f, "{:>pad$}", bar, pad = front_pad)?;
-        writeln!(
-            f,
-            "{:^pad$}{} {}",
-            line.bold(),
-            bar,
-            self.span_snippet(),
-            pad = front_pad - 1
-        )?;
-        let highlight = format!(
-            "{:pad$}{}",
-            " ",
-            self.underline().color(color).bold(),
-            pad = self.span.lo - self.line_span().lo,
-        );
-        writeln!(f, "{:>pad$}{}", bar, highlight, pad = front_pad)?;
-        writeln!(
-            f,
-            "{:>pad$} {} {}",
-            bar,
-            "Hilfe:".underline().bold(),
-            self.msg,
-            pad = front_pad
-        )?;
+        self.write_code_snippet(f, color)?;
+        writeln!(f, "")?;
+        for sug in &self.suggestions {
+            writeln!(f, " • {}", sug)?;
+        }
         write!(f, "")
+    }
+}
+
+impl fmt::Debug for Diagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
     }
 }
