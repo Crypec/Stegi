@@ -39,6 +39,7 @@ pub enum TokenKind {
     Underscore,
     ColonEq,
     ThinArrow,
+    FatArrow,
     EOF,
 }
 
@@ -66,6 +67,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Underscore => "_",
             TokenKind::ColonEq => ":=",
             TokenKind::ThinArrow => "->",
+            TokenKind::FatArrow => "=>",
             TokenKind::EOF => "EOF",
         };
         write!(f, "{}", str)
@@ -133,7 +135,7 @@ impl FromStr for Operator {
             "oder" | "||" => Ok(Operator::Or),
             "ungleich" | "!=" => Ok(Operator::NotEq),
             "gleich" | "==" => Ok(Operator::EqEq),
-            "groesser_gleich" | ">=" => Ok(Operator::EqEq),
+            "groesser_gleich" | ">=" => Ok(Operator::GreaterEq),
             "groesser" | ">" => Ok(Operator::Greater),
             "kleiner" | "<" => Ok(Operator::Less),
             "kleiner_gleich" | "<=" => Ok(Operator::LessEq),
@@ -186,6 +188,7 @@ pub enum Keyword {
     Return,
     For,
     Break,
+    Continue,
     Range,
     If,
     Then,
@@ -202,6 +205,7 @@ impl Keyword {
             Keyword::While => "solange",
             Keyword::Return => "rueckgabe",
             Keyword::For => "fuer",
+            Keyword::Continue => "weiter",
             Keyword::Break => "stop",
             Keyword::Range => "bis",
             Keyword::If => "wenn",
@@ -234,6 +238,7 @@ impl FromStr for Keyword {
             "dann" => Ok(Keyword::Then),
             "sonst" => Ok(Keyword::Else),
             "stop" => Ok(Keyword::Break),
+            "weiter" => Ok(Keyword::Continue),
             _ => Err(()),
         }
     }
@@ -246,7 +251,7 @@ pub struct Token {
 }
 
 pub struct Lexer<'a> {
-    buffer: &'a String,
+    src_buf: &'a String,
     cursor: usize,
     line: usize,
 }
@@ -254,13 +259,13 @@ pub struct Lexer<'a> {
 impl<'a> Lexer<'a> {
     pub fn new(data: &'a String) -> Self {
         Lexer {
-            buffer: data,
+            src_buf: data,
             cursor: 0,
             line: 1,
         }
     }
     fn advance(&mut self) -> Option<char> {
-        let c = self.buffer.chars().nth(self.cursor);
+        let c = self.src_buf.chars().nth(self.cursor);
         if let Some('\n') = c {
             self.line += 1;
         }
@@ -269,11 +274,11 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn peek(&mut self) -> Option<char> {
-        self.buffer.chars().nth(self.cursor)
+        self.src_buf.chars().nth(self.cursor)
     }
 
     fn peek_next(&mut self) -> Option<char> {
-        self.buffer.chars().nth(self.cursor + 1)
+        self.src_buf.chars().nth(self.cursor + 1)
     }
 
     fn map_if<F>(&mut self, p: F, res: TokenKind) -> Option<TokenKind>
@@ -334,7 +339,7 @@ impl<'a> Lexer<'a> {
                 .map_if(|p| p == '|', TokenKind::Operator(Operator::Or))
                 .unwrap_or(TokenKind::Sep),
             '!' => self
-                .map_if(|p| p == '=', TokenKind::Keyword(Keyword::Range))
+                .map_if(|p| p == '=', TokenKind::Operator(Operator::NotEq))
                 .unwrap_or(TokenKind::Operator(Operator::Not)),
             '<' => self
                 .map_if(|p| p == '=', TokenKind::Operator(Operator::LessEq))
@@ -342,19 +347,27 @@ impl<'a> Lexer<'a> {
             '>' => self
                 .map_if(|p| p == '=', TokenKind::Operator(Operator::GreaterEq))
                 .unwrap_or(TokenKind::Operator(Operator::Greater)),
-            '=' => self
-                .map_if(|p| p == '=', TokenKind::Operator(Operator::EqEq))
-                .unwrap_or(TokenKind::Eq),
             '.' => self
                 .map_if(|p| p == '.', TokenKind::Keyword(Keyword::Range))
                 .unwrap_or(TokenKind::Dot),
+            '=' => match self.peek() {
+                Some('=') => {
+                    self.advance()?;
+                    TokenKind::Operator(Operator::EqEq)
+                }
+                Some('>') => {
+                    self.advance()?;
+                    TokenKind::FatArrow
+                }
+                _ => TokenKind::Eq,
+            },
             ':' => match self.peek() {
                 Some(':') => {
                     self.advance();
                     TokenKind::PathSep
                 }
                 Some('=') => {
-                    self.advance();
+                    self.advance()?;
                     TokenKind::ColonEq
                 }
                 _ => TokenKind::Colon,
@@ -367,7 +380,6 @@ impl<'a> Lexer<'a> {
                 // if we find a comment we can skip until we find a new line
                 if let Some('/') = self.peek() {
                     self.advance_while(|&c| c != '\n');
-                    self.advance();
                     TokenKind::Comment
                 } else {
                     TokenKind::Operator(Operator::Slash)
@@ -384,6 +396,15 @@ impl<'a> Lexer<'a> {
                 Err(err) => return Some(Err(err)),
             },
             'a'..='z' | 'A'..='Z' => self.ident(start),
+            '&' => match self.peek() {
+                Some('&') => {
+                    self.advance()?;
+                    TokenKind::Operator(Operator::And)
+                }
+                // TODO(Simon): we should just return a more specific error and hinting at the use of th keyword operators
+                // NOTE(Simon): binary AND is not allowed in this language
+                _ => return Some(Err(SyntaxError::UnexpectedChar(c, self.line))),
+            },
             c => return Some(Err(SyntaxError::UnexpectedChar(c, self.line))),
         };
         let token = self.yield_token(start, token_kind);
@@ -399,7 +420,7 @@ impl<'a> Lexer<'a> {
 
     fn sub_string(&mut self, start: usize) -> String {
         // TODO(Simon): working with unicode strings is hard, this does probably not work with non ascii utf-8 strings
-        self.buffer[start..self.cursor].to_string()
+        self.src_buf[start..self.cursor].to_string()
     }
 
     fn string(&mut self, start: usize) -> Result<TokenKind, SyntaxError> {
@@ -416,6 +437,14 @@ impl<'a> Lexer<'a> {
     fn number(&mut self, start: usize) -> Result<TokenKind, SyntaxError> {
         self.advance_while(|&c| c.is_digit(10));
         if let Some('.') = self.peek() {
+            // if we find the range token we just bail out early and tokenize it on the next iteration
+            // example: 3..10
+            //          ^ first token, at this point we bail out and get the rest on a later iteration
+            if let Some('.') = self.peek_next() {
+                let num = self.src_buf[start..self.cursor].parse::<f64>().unwrap();
+                return Ok(TokenKind::Literal(Literal::Number(num)));
+            }
+
             // we found a . but no numbers after it
             if self.peek_next().map(|c| !c.is_digit(10)).unwrap_or(true) {
                 return Err(SyntaxError::UnexpectedChar('.', self.line));
@@ -423,7 +452,7 @@ impl<'a> Lexer<'a> {
             self.advance();
             self.advance_while(|c| c.is_digit(10));
         }
-        let num = self.buffer[start..self.cursor].parse::<f64>().unwrap();
+        let num = self.src_buf[start..self.cursor].parse::<f64>().unwrap();
         Ok(TokenKind::Literal(Literal::Number(num)))
     }
 
@@ -432,10 +461,12 @@ impl<'a> Lexer<'a> {
             ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9') || c == '_'
         });
         let lexeme = self.sub_string(start);
+
+        // NOTE(Simon): we use or else because the argument only needs to be lazy evaluated if we get an err
         str::parse::<Keyword>(&lexeme)
             .map(TokenKind::Keyword)
-            .map_err(|_| str::parse::<Operator>(&lexeme))
-            .map_err(|_| str::parse::<Literal>(&lexeme))
+            .or_else(|_| str::parse::<Operator>(&lexeme).map(TokenKind::Operator))
+            .or_else(|_| str::parse::<Literal>(&lexeme).map(TokenKind::Literal))
             .unwrap_or(TokenKind::Ident(lexeme.clone()))
     }
 
@@ -449,14 +480,547 @@ impl Iterator for Lexer<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(item) = self.scan_token() {
             match item {
-                Ok(t) => {
-                    if t.kind != TokenKind::Comment {
-                        return Some(Ok(t));
-                    }
-                }
-                Err(e) => return Some(Err(e)),
-            }
+                Ok(t) if t.kind == TokenKind::Comment => (),
+                Ok(_) | Err(_) => return Some(item),
+            };
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_vec_eq(expected: Vec<TokenKind>, actual: Vec<TokenKind>) {
+        assert_eq!(expected.len(), actual.len());
+        expected
+            .iter()
+            .zip(actual.iter())
+            .for_each(|(e, a)| assert_eq!(e, a));
+    }
+
+    #[test]
+    fn lex_fn_header() {
+        let test = String::from("fn test(x: Zahl) -> [Text]");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Keyword(Keyword::Fun),
+            TokenKind::Ident("test".to_string()),
+            TokenKind::LParen,
+            TokenKind::Ident("x".to_string()),
+            TokenKind::Colon,
+            TokenKind::Ident("Zahl".to_string()),
+            TokenKind::RParen,
+            TokenKind::ThinArrow,
+            TokenKind::LBracket,
+            TokenKind::Ident("Text".to_string()),
+            TokenKind::RBracket,
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+    #[test]
+    fn lex_vardef_untyped() {
+        let test = String::from("a := 20;");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Ident("a".to_string()),
+            TokenKind::ColonEq,
+            TokenKind::Literal(Literal::Number(20.0)),
+            TokenKind::Semi,
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_vardef_typed() {
+        let test = String::from("a : [Zahl] = 20;");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Ident("a".to_string()),
+            TokenKind::Colon,
+            TokenKind::LBracket,
+            TokenKind::Ident("Zahl".to_string()),
+            TokenKind::RBracket,
+            TokenKind::Eq,
+            TokenKind::Literal(Literal::Number(20.0)),
+            TokenKind::Semi,
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_struct_decl() {
+        let test = String::from("typ Test {a: Foo, b: Bar}");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Keyword(Keyword::Struct),
+            TokenKind::Ident("Test".to_string()),
+            TokenKind::LBrace,
+            TokenKind::Ident("a".to_string()),
+            TokenKind::Colon,
+            TokenKind::Ident("Foo".to_string()),
+            TokenKind::Comma,
+            TokenKind::Ident("b".to_string()),
+            TokenKind::Colon,
+            TokenKind::Ident("Bar".to_string()),
+            TokenKind::RBrace,
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_enum_decl() {
+        let test = String::from("typ Bool = Wahr | Falsch");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Keyword(Keyword::Struct),
+            TokenKind::Ident("Bool".to_string()),
+            TokenKind::Eq,
+            TokenKind::Ident("Wahr".to_string()),
+            TokenKind::Sep,
+            TokenKind::Ident("Falsch".to_string()),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_impl_block_decl() {
+        let test = String::from("impl Foo {}");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Keyword(Keyword::Impl),
+            TokenKind::Ident("Foo".to_string()),
+            TokenKind::LBrace,
+            TokenKind::RBrace,
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_range_dotted_no_space() {
+        let test = String::from("0..10");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Literal(Literal::Number(0.0)),
+            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Literal(Literal::Number(10.0)),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    #[should_panic]
+    fn lex_range_keyword_no_space_fail() {
+        // this is not expected to work because we see 0 as a number and bis10 as an ident
+        // Solution 1: would be to insert a space like so 0 bis 10.
+        // Solution 2: use the dot operator for ranges: 0..10
+        let test = String::from("0bis10");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Literal(Literal::Number(0.0)),
+            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Literal(Literal::Number(10.0)),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_range_keyword_space() {
+        let test = String::from("0 bis 10");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Literal(Literal::Number(0.0)),
+            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Literal(Literal::Number(10.0)),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_range_dotted_space() {
+        let test = String::from("0 .. 10");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Literal(Literal::Number(0.0)),
+            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Literal(Literal::Number(10.0)),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_number_int() {
+        let test = String::from("0 100 420 6969 3141");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Literal(Literal::Number(0.0)),
+            TokenKind::Literal(Literal::Number(100.0)),
+            TokenKind::Literal(Literal::Number(420.0)),
+            TokenKind::Literal(Literal::Number(6969.0)),
+            TokenKind::Literal(Literal::Number(3141.0)),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+    #[test]
+    fn lex_number_float() {
+        let test = String::from("0.1 100.10 420.123 6969.2 3141.1");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Literal(Literal::Number(0.1)),
+            TokenKind::Literal(Literal::Number(100.10)),
+            TokenKind::Literal(Literal::Number(420.123)),
+            TokenKind::Literal(Literal::Number(6969.2)),
+            TokenKind::Literal(Literal::Number(3141.1)),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_expr_num_1() {
+        let test = String::from("-1-(a + 20)");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Operator(Operator::Minus),
+            TokenKind::Literal(Literal::Number(1.0)),
+            TokenKind::Operator(Operator::Minus),
+            TokenKind::LParen,
+            TokenKind::Ident("a".to_string()),
+            TokenKind::Operator(Operator::Plus),
+            TokenKind::Literal(Literal::Number(20.0)),
+            TokenKind::RParen,
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_expr_num_2() {
+        let test = String::from("-1-(a * 20 / 2)");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Operator(Operator::Minus),
+            TokenKind::Literal(Literal::Number(1.0)),
+            TokenKind::Operator(Operator::Minus),
+            TokenKind::LParen,
+            TokenKind::Ident("a".to_string()),
+            TokenKind::Operator(Operator::Star),
+            TokenKind::Literal(Literal::Number(20.0)),
+            TokenKind::Operator(Operator::Slash),
+            TokenKind::Literal(Literal::Number(2.0)),
+            TokenKind::RParen,
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_expr_num_comment() {
+        let test = String::from("-1-(a * 20 // 2)");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Operator(Operator::Minus),
+            TokenKind::Literal(Literal::Number(1.0)),
+            TokenKind::Operator(Operator::Minus),
+            TokenKind::LParen,
+            TokenKind::Ident("a".to_string()),
+            TokenKind::Operator(Operator::Star),
+            TokenKind::Literal(Literal::Number(20.0)),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_expr_and_op() {
+        let test = String::from("!wahr && falsch");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        let expected = vec![
+            TokenKind::Operator(Operator::Not),
+            TokenKind::Literal(Literal::Bool(true)),
+            TokenKind::Operator(Operator::And),
+            TokenKind::Literal(Literal::Bool(false)),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+    #[test]
+    fn lex_expr_and_keyword() {
+        let test = String::from("!wahr und falsch");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            TokenKind::Operator(Operator::Not),
+            TokenKind::Literal(Literal::Bool(true)),
+            TokenKind::Operator(Operator::And),
+            TokenKind::Literal(Literal::Bool(false)),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+    #[test]
+    fn lex_bool_ops() {
+        let test = String::from("und || && oder !nicht");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            TokenKind::Operator(Operator::And),
+            TokenKind::Operator(Operator::Or),
+            TokenKind::Operator(Operator::And),
+            TokenKind::Operator(Operator::Or),
+            TokenKind::Operator(Operator::Not),
+            TokenKind::Operator(Operator::Not),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_bool_ops_no_space() {
+        let test = String::from("und||&&oder!nicht");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            TokenKind::Operator(Operator::And),
+            TokenKind::Operator(Operator::Or),
+            TokenKind::Operator(Operator::And),
+            TokenKind::Operator(Operator::Or),
+            TokenKind::Operator(Operator::Not),
+            TokenKind::Operator(Operator::Not),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_math_ops() {
+        let test = String::from("+ - * /");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            TokenKind::Operator(Operator::Plus),
+            TokenKind::Operator(Operator::Minus),
+            TokenKind::Operator(Operator::Star),
+            TokenKind::Operator(Operator::Slash),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_math_ops_no_space() {
+        let test = String::from("+-/**/");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            TokenKind::Operator(Operator::Plus),
+            TokenKind::Operator(Operator::Minus),
+            TokenKind::Operator(Operator::Slash),
+            TokenKind::Operator(Operator::Star),
+            TokenKind::Operator(Operator::Star),
+            TokenKind::Operator(Operator::Slash),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_cmp_ops() {
+        let test = String::from(
+            "groesser_gleich ungleich != gleich  == > groesser < kleiner kleiner_gleich >= <= =>",
+        );
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        dbg!(&actual);
+
+        let expected = vec![
+            TokenKind::Operator(Operator::GreaterEq),
+            TokenKind::Operator(Operator::NotEq),
+            TokenKind::Operator(Operator::NotEq),
+            TokenKind::Operator(Operator::EqEq),
+            TokenKind::Operator(Operator::EqEq),
+            TokenKind::Operator(Operator::Greater),
+            TokenKind::Operator(Operator::Greater),
+            TokenKind::Operator(Operator::Less),
+            TokenKind::Operator(Operator::Less),
+            TokenKind::Operator(Operator::LessEq),
+            TokenKind::Operator(Operator::GreaterEq),
+            TokenKind::Operator(Operator::LessEq),
+            TokenKind::FatArrow,
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_keywords() {
+        let test = String::from(
+            "funktion fun fn typ Typ selbst solange rueckgabe fuer bis wenn dann sonst stop weiter",
+        );
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+
+        dbg!(&actual);
+
+        let expected = vec![
+            TokenKind::Keyword(Keyword::Fun),
+            TokenKind::Keyword(Keyword::Fun),
+            TokenKind::Keyword(Keyword::Fun),
+            TokenKind::Keyword(Keyword::Struct),
+            TokenKind::Keyword(Keyword::Struct),
+            TokenKind::Keyword(Keyword::This),
+            TokenKind::Keyword(Keyword::While),
+            TokenKind::Keyword(Keyword::Return),
+            TokenKind::Keyword(Keyword::For),
+            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Keyword(Keyword::If),
+            TokenKind::Keyword(Keyword::Then),
+            TokenKind::Keyword(Keyword::Else),
+            TokenKind::Keyword(Keyword::Break),
+            TokenKind::Keyword(Keyword::Continue),
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+    #[test]
+    fn lex_punctuatuin_tokens() {
+        let test = String::from(":: : {} () [] | || , ; . .. = _ := ->");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            TokenKind::PathSep,
+            TokenKind::Colon,
+            TokenKind::LBrace,
+            TokenKind::RBrace,
+            TokenKind::LParen,
+            TokenKind::RParen,
+            TokenKind::LBracket,
+            TokenKind::RBracket,
+            TokenKind::Sep,
+            TokenKind::Operator(Operator::Or),
+            TokenKind::Comma,
+            TokenKind::Semi,
+            TokenKind::Dot,
+            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Eq,
+            TokenKind::Underscore,
+            TokenKind::ColonEq,
+            TokenKind::ThinArrow,
+        ];
+
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_idents() {
+        let test = String::from("foo bar_10 test_1_1 bar__f00 D3ADB33F 10A");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            TokenKind::Ident("foo".to_string()),
+            TokenKind::Ident("bar_10".to_string()),
+            TokenKind::Ident("test_1_1".to_string()),
+            TokenKind::Ident("bar__f00".to_string()),
+            TokenKind::Ident("D3ADB33F".to_string()),
+            TokenKind::Literal(Literal::Number(10.0)),
+            TokenKind::Ident("A".to_string()),
+        ];
+
+        assert_vec_eq(expected, actual);
     }
 }
