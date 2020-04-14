@@ -13,7 +13,7 @@ pub enum TokenKind {
     Comment,
 
     // Values for internally supported types
-    Literal(Literal),
+    Lit(Lit),
 
     PathSep,
     Sep,
@@ -49,7 +49,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Ident(id) => id,
             TokenKind::Keyword(kw) => kw.as_str(),
             TokenKind::Comment => "//",
-            TokenKind::Literal(l) => l.as_str(),
+            TokenKind::Lit(l) => l.as_str(),
             TokenKind::PathSep => "::",
             TokenKind::LBrace => "{",
             TokenKind::RBrace => "}",
@@ -145,33 +145,33 @@ impl FromStr for Operator {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum Literal {
+pub enum Lit {
     String(String),
     Number(f64),
     Bool(bool),
 }
 
-impl Eq for Literal {}
+impl Eq for Lit {}
 
-impl Literal {
+impl Lit {
     fn as_str(&self) -> &'static str {
         match self {
-            Literal::String(_) => "Textliteral",
-            Literal::Number(_) => "Zahlenliteral",
-            Literal::Bool(_) => "Boolliteral",
+            Self::String(_) => "Textliteral",
+            Self::Number(_) => "Zahlenliteral",
+            Self::Bool(_) => "Boolliteral",
         }
     }
 }
 
-impl FromStr for Literal {
+impl FromStr for Lit {
     type Err = ();
 
     // NOTE(Simon): we just match bool litearl here to avoid the added performance cost of checking for a string or a number
     // each time we build a token, we already do this in the scan_token fn of the lexer
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "wahr" => Ok(Literal::Bool(true)),
-            "falsch" => Ok(Literal::Bool(false)),
+            "wahr" => Ok(Self::Bool(true)),
+            "falsch" => Ok(Self::Bool(false)),
             _ => Err(()),
         }
     }
@@ -430,8 +430,8 @@ impl<'a> Lexer<'a> {
         }
         // consume trailing "
         self.advance();
-        let literal = self.sub_string(start);
-        Ok(TokenKind::Literal(Literal::String(literal)))
+        let lit = self.sub_string(start);
+        Ok(TokenKind::Lit(Lit::String(lit)))
     }
 
     fn number(&mut self, start: usize) -> Result<TokenKind, SyntaxError> {
@@ -442,7 +442,7 @@ impl<'a> Lexer<'a> {
             //          ^ first token, at this point we bail out and get the rest on a later iteration
             if let Some('.') = self.peek_next() {
                 let num = self.src_buf[start..self.cursor].parse::<f64>().unwrap();
-                return Ok(TokenKind::Literal(Literal::Number(num)));
+                return Ok(TokenKind::Lit(Lit::Number(num)));
             }
 
             // we found a . but no numbers after it
@@ -453,7 +453,7 @@ impl<'a> Lexer<'a> {
             self.advance_while(|c| c.is_digit(10));
         }
         let num = self.src_buf[start..self.cursor].parse::<f64>().unwrap();
-        Ok(TokenKind::Literal(Literal::Number(num)))
+        Ok(TokenKind::Lit(Lit::Number(num)))
     }
 
     fn ident(&mut self, start: usize) -> TokenKind {
@@ -466,7 +466,7 @@ impl<'a> Lexer<'a> {
         str::parse::<Keyword>(&lexeme)
             .map(TokenKind::Keyword)
             .or_else(|_| str::parse::<Operator>(&lexeme).map(TokenKind::Operator))
-            .or_else(|_| str::parse::<Literal>(&lexeme).map(TokenKind::Literal))
+            .or_else(|_| str::parse::<Lit>(&lexeme).map(TokenKind::Lit))
             .unwrap_or(TokenKind::Ident(lexeme.clone()))
     }
 
@@ -535,7 +535,7 @@ mod tests {
         let expected = vec![
             TokenKind::Ident("a".to_string()),
             TokenKind::ColonEq,
-            TokenKind::Literal(Literal::Number(20.0)),
+            TokenKind::Lit(Lit::Number(20.0)),
             TokenKind::Semi,
         ];
 
@@ -557,7 +557,7 @@ mod tests {
             TokenKind::Ident("Zahl".to_string()),
             TokenKind::RBracket,
             TokenKind::Eq,
-            TokenKind::Literal(Literal::Number(20.0)),
+            TokenKind::Lit(Lit::Number(20.0)),
             TokenKind::Semi,
         ];
 
@@ -636,9 +636,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         let expected = vec![
-            TokenKind::Literal(Literal::Number(0.0)),
+            TokenKind::Lit(Lit::Number(0.0)),
             TokenKind::Keyword(Keyword::Range),
-            TokenKind::Literal(Literal::Number(10.0)),
+            TokenKind::Lit(Lit::Number(10.0)),
         ];
 
         assert_vec_eq(expected, actual);
@@ -657,9 +657,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         let expected = vec![
-            TokenKind::Literal(Literal::Number(0.0)),
+            TokenKind::Lit(Lit::Number(0.0)),
             TokenKind::Keyword(Keyword::Range),
-            TokenKind::Literal(Literal::Number(10.0)),
+            TokenKind::Lit(Lit::Number(10.0)),
         ];
 
         assert_vec_eq(expected, actual);
@@ -674,9 +674,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         let expected = vec![
-            TokenKind::Literal(Literal::Number(0.0)),
+            TokenKind::Lit(Lit::Number(0.0)),
             TokenKind::Keyword(Keyword::Range),
-            TokenKind::Literal(Literal::Number(10.0)),
+            TokenKind::Lit(Lit::Number(10.0)),
         ];
 
         assert_vec_eq(expected, actual);
@@ -691,9 +691,9 @@ mod tests {
             .collect::<Vec<_>>();
 
         let expected = vec![
-            TokenKind::Literal(Literal::Number(0.0)),
+            TokenKind::Lit(Lit::Number(0.0)),
             TokenKind::Keyword(Keyword::Range),
-            TokenKind::Literal(Literal::Number(10.0)),
+            TokenKind::Lit(Lit::Number(10.0)),
         ];
 
         assert_vec_eq(expected, actual);
@@ -708,11 +708,11 @@ mod tests {
             .collect::<Vec<_>>();
 
         let expected = vec![
-            TokenKind::Literal(Literal::Number(0.0)),
-            TokenKind::Literal(Literal::Number(100.0)),
-            TokenKind::Literal(Literal::Number(420.0)),
-            TokenKind::Literal(Literal::Number(6969.0)),
-            TokenKind::Literal(Literal::Number(3141.0)),
+            TokenKind::Lit(Lit::Number(0.0)),
+            TokenKind::Lit(Lit::Number(100.0)),
+            TokenKind::Lit(Lit::Number(420.0)),
+            TokenKind::Lit(Lit::Number(6969.0)),
+            TokenKind::Lit(Lit::Number(3141.0)),
         ];
 
         assert_vec_eq(expected, actual);
@@ -726,11 +726,11 @@ mod tests {
             .collect::<Vec<_>>();
 
         let expected = vec![
-            TokenKind::Literal(Literal::Number(0.1)),
-            TokenKind::Literal(Literal::Number(100.10)),
-            TokenKind::Literal(Literal::Number(420.123)),
-            TokenKind::Literal(Literal::Number(6969.2)),
-            TokenKind::Literal(Literal::Number(3141.1)),
+            TokenKind::Lit(Lit::Number(0.1)),
+            TokenKind::Lit(Lit::Number(100.10)),
+            TokenKind::Lit(Lit::Number(420.123)),
+            TokenKind::Lit(Lit::Number(6969.2)),
+            TokenKind::Lit(Lit::Number(3141.1)),
         ];
 
         assert_vec_eq(expected, actual);
@@ -746,12 +746,12 @@ mod tests {
 
         let expected = vec![
             TokenKind::Operator(Operator::Minus),
-            TokenKind::Literal(Literal::Number(1.0)),
+            TokenKind::Lit(Lit::Number(1.0)),
             TokenKind::Operator(Operator::Minus),
             TokenKind::LParen,
             TokenKind::Ident("a".to_string()),
             TokenKind::Operator(Operator::Plus),
-            TokenKind::Literal(Literal::Number(20.0)),
+            TokenKind::Lit(Lit::Number(20.0)),
             TokenKind::RParen,
         ];
 
@@ -768,14 +768,14 @@ mod tests {
 
         let expected = vec![
             TokenKind::Operator(Operator::Minus),
-            TokenKind::Literal(Literal::Number(1.0)),
+            TokenKind::Lit(Lit::Number(1.0)),
             TokenKind::Operator(Operator::Minus),
             TokenKind::LParen,
             TokenKind::Ident("a".to_string()),
             TokenKind::Operator(Operator::Star),
-            TokenKind::Literal(Literal::Number(20.0)),
+            TokenKind::Lit(Lit::Number(20.0)),
             TokenKind::Operator(Operator::Slash),
-            TokenKind::Literal(Literal::Number(2.0)),
+            TokenKind::Lit(Lit::Number(2.0)),
             TokenKind::RParen,
         ];
 
@@ -792,12 +792,12 @@ mod tests {
 
         let expected = vec![
             TokenKind::Operator(Operator::Minus),
-            TokenKind::Literal(Literal::Number(1.0)),
+            TokenKind::Lit(Lit::Number(1.0)),
             TokenKind::Operator(Operator::Minus),
             TokenKind::LParen,
             TokenKind::Ident("a".to_string()),
             TokenKind::Operator(Operator::Star),
-            TokenKind::Literal(Literal::Number(20.0)),
+            TokenKind::Lit(Lit::Number(20.0)),
         ];
 
         assert_vec_eq(expected, actual);
@@ -813,9 +813,9 @@ mod tests {
 
         let expected = vec![
             TokenKind::Operator(Operator::Not),
-            TokenKind::Literal(Literal::Bool(true)),
+            TokenKind::Lit(Lit::Bool(true)),
             TokenKind::Operator(Operator::And),
-            TokenKind::Literal(Literal::Bool(false)),
+            TokenKind::Lit(Lit::Bool(false)),
         ];
 
         assert_vec_eq(expected, actual);
@@ -829,9 +829,9 @@ mod tests {
             .collect::<Vec<_>>();
         let expected = vec![
             TokenKind::Operator(Operator::Not),
-            TokenKind::Literal(Literal::Bool(true)),
+            TokenKind::Lit(Lit::Bool(true)),
             TokenKind::Operator(Operator::And),
-            TokenKind::Literal(Literal::Bool(false)),
+            TokenKind::Lit(Lit::Bool(false)),
         ];
 
         assert_vec_eq(expected, actual);
@@ -1017,7 +1017,7 @@ mod tests {
             TokenKind::Ident("test_1_1".to_string()),
             TokenKind::Ident("bar__f00".to_string()),
             TokenKind::Ident("D3ADB33F".to_string()),
-            TokenKind::Literal(Literal::Number(10.0)),
+            TokenKind::Lit(Lit::Number(10.0)),
             TokenKind::Ident("A".to_string()),
         ];
 

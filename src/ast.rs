@@ -12,113 +12,163 @@ pub trait Visitor {
     fn visit_expr(&mut self, expr: &mut Expr) -> Self::Result;
 }
 
-#[derive(Derivative)]
-#[derivative(Debug)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 pub enum ExprKind {
-    #[derivative(Debug = "transparent")]
-    Binary(Binary),
+    /// normal binary expression, only used for numeric expressions
+    /// example: a      +     42
+    ///          ^-rhs  ^-op  ^-lhs
+    Binary {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+        op: BinaryOp,
+    },
 
-    #[derivative(Debug = "transparent")]
-    Unary(Unary),
+    /// just like a normal binary expression but only used for logical expressions
+    /// example: a      &&    b
+    ///          ^-rhs  ^-op  ^-lhs
+    Logical {
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
+        op: CmpOp,
+    },
 
-    #[derivative(Debug = "transparent")]
-    Logical(Logical),
+    /// one sided expression
+    /// example: -    3
+    ///          ^-op ^-rhs
+    Unary { rhs: Box<Expr>, op: UnaryOp },
 
-    Struct(Struct),
+    /// struct literals are used to initialize objects with values
+    /// example: Person {name: "Torben"}
+    ///          ^-pat  ^^^^^^^^^^^^^^- member with name and init expr
+    Struct { pat: Path, members: Vec<Member> },
 
+    /// a tuple expression is just a collection of other expressions
+    /// example: (20,    20)
+    ///           ^-expr ^-expr
     Tup(Vec<Expr>),
-
-    #[derivative(Debug = "transparent")]
+    /// variable reference, possibly containing `::` to refer to types in other moduels
+    /// example: foo::bar
+    ///          ^^^-segment
     Path(Path),
 
-    #[derivative(Debug = "transparent")]
-    Index(Index),
+    /// used to represent all sorts of index expressions
+    /// example: foo[     expr     ]
+    ///          ^-callee ^index
+    Index { callee: Box<Expr>, index: Box<Expr> },
 
-    Assign(Box<Expr>, Box<Expr>),
+    /// assignment expressions can be used to change the value of an already define variable
+    /// NOTE: it's type is fixed and must be equal on both sides of the expression
+    /// example: a.b    = 20
+    ///          ^-callee ^value
+    Assign { target: Box<Expr>, value: Box<Expr> },
 
+    /// array literals are used to fill arrays with actual values
+    /// example: [1, 2, 3, 4, 5]
+    ///           ^-create new array with values from 1 to including 5
     Array(Vec<Expr>),
 
+    /// a range pattern
+    /// example: 0   ..   10
+    ///           ^-start ^-end
     Range(Box<Expr>, Box<Expr>),
 
-    Literal(Literal, Span),
+    /// a raw literal is the smallest possible expression
+    /// example: 42
+    ///          ^-num literal
+    /// example: "foo"
+    ///          ^-string/text literal
+    Lit(Lit, Span),
 
-    #[derivative(Debug = "transparent")]
-    Variable(Variable),
-
+    /// access of a named struct field like a.b
+    /// example: a  .    b
+    ///          ^-callee ^ field
     Field(Box<Expr>, Ident),
 
-    This(Variable, Span),
+    /// refers to a object instance and can be used to refer to that instance and it's member fields e.g. (selbst.foo)
+    /// if a function contains self as an argument in it's signature it automatically becomes an associated 'Method' with that datatype
+    /// NOTE: there are a few restrictions while using self in a function
+    /// 1. self can only be used inside impl blocks
+    /// 2. if a function contains self in it's signature self has to be the first parameter
+    /// 3. the self parameter does not need to have any addition type information
+    /// example: selbst    .     foo
+    ///          ^-instance ptr  ^-member field
+    This(Ident),
 
-    #[derivative(Debug = "transparent")]
-    Call(Call),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Index {
-    pub callee: Box<Expr>,
-    pub index: Box<Expr>,
+    /// function call e.g. foo(-42, 1, 1)
+    /// example: foo    (-42,     10)
+    ///          ^-callee ^-arg0  ^-arg1
+    Call { callee: Box<Expr>, args: Vec<Expr> },
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Member {
-    pub ident: Ident,
-    pub expr: Box<Expr>,
+    pub name: Ident,
+    pub init: Box<Expr>,
     pub span: Span,
 }
 
 impl Member {
-    pub fn new(ident: Ident, expr: Expr, span: Span) -> Self {
+    pub fn new(name: Ident, expr: Expr, span: Span) -> Self {
         Self {
-            ident,
-            expr: Box::new(expr),
+            name,
+            init: Box::new(expr),
             span,
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Struct {
-    pub pat: Path,
-    pub members: Vec<Member>,
-}
-
-#[derive(Derivative)]
-#[derivative(Debug)]
-#[derive(PartialEq)]
 pub enum Stmt {
-    #[derivative(Debug = "transparent")]
     Expr(Expr),
 
-    #[derivative(Debug = "transparent")]
-    Local(Box<Local>),
+    VarDef {
+        pat: Ident, // TODO(Simon): this should really be a pattern to allow for destructoring
+        init: Expr,
+        ty: Ty,
+        span: Span,
+    },
 
-    #[derivative(Debug = "transparent")]
     EnumDecl(EnumDecl),
 
-    #[derivative(Debug = "transparent")]
     Block(Block),
 
-    If(Expr, Block, Option<Box<Stmt>>),
-    While(Expr, Block),
+    If(Branch),
 
-    For(ForLoop),
+    While {
+        cond: Expr,
+        body: Block,
+        span: Span,
+    },
 
-    Break,
+    For {
+        it: Expr,
+        var: Ident,
+        body: Block,
+        span: Span,
+    },
+
+    Break(Span),
+
+    Continue(Span),
 
     Ret(Expr, Span),
 
-    #[derivative(Debug = "transparent")]
     FnDecl(FnDecl),
+
+    StructDecl(StructDecl),
 
     ImplBlock {
         target: Path,
         fn_decls: Vec<FnDecl>,
         span: Span,
     },
+}
 
-    #[derivative(Debug = "transparent")]
-    StructDecl(StructDecl),
+#[derive(Debug, PartialEq)]
+pub enum Branch {
+    Primary { cond: Expr, body: Block },
+    Secondary { cond: Expr, body: Block },
+    Final { body: Block },
 }
 
 impl ASTNode for Stmt {
@@ -155,44 +205,6 @@ pub struct Variant {
 pub enum VariantData {
     Tuple(Vec<Ty>),
     Unit,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Local {
-    pub ident: Ident, // TODO(Simon): this should really be a pattern
-    pub init: Expr,
-    pub ty: Ty,
-    pub span: Span,
-}
-
-impl Local {
-    pub fn new(init: Expr, ident: Ident, ty: Ty, span: Span) -> Self {
-        Local {
-            init,
-            ident,
-            ty,
-            span,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct ForLoop {
-    pub it: Expr,
-    pub var: Ident,
-    pub body: Block,
-    pub span: Span,
-}
-
-impl ForLoop {
-    pub fn new(it: Expr, var: Ident, body: Block, span: Span) -> Self {
-        ForLoop {
-            it,
-            var,
-            body,
-            span,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -390,51 +402,6 @@ impl Block {
     }
 }
 
-impl ExprKind {
-    pub fn binary(lhs: Expr, rhs: Expr, op: BinOp) -> Self {
-        ExprKind::Binary(Binary {
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            op,
-        })
-    }
-    pub fn logical(lhs: Expr, rhs: Expr, op: CmpOp) -> Self {
-        ExprKind::Logical(Logical {
-            lhs: Box::new(lhs),
-            rhs: Box::new(rhs),
-            op,
-        })
-    }
-
-    pub fn unary(rhs: Expr, op: UnaryOp) -> Self {
-        ExprKind::Unary(Unary {
-            rhs: Box::new(rhs),
-            op,
-        })
-    }
-
-    pub fn field(lhs: Expr, ident: Ident) -> Self {
-        ExprKind::Field(Box::new(lhs), ident)
-    }
-
-    pub fn call(callee: Expr, args: Vec<Expr>) -> Self {
-        ExprKind::Call(Call {
-            callee: Box::new(callee),
-            args,
-        })
-    }
-    pub fn index(callee: Expr, index: Expr) -> Self {
-        ExprKind::Index(Index {
-            callee: Box::new(callee),
-            index: Box::new(index),
-        })
-    }
-
-    pub fn struct_lit(pat: Path, members: Vec<Member>) -> Self {
-        ExprKind::Struct(Struct { pat, members })
-    }
-}
-
 impl Default for ExprKind {
     fn default() -> Self {
         ExprKind::Tup(Vec::new())
@@ -473,29 +440,22 @@ impl Expr {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Binary {
-    pub lhs: Box<Expr>,
-    pub rhs: Box<Expr>,
-    pub op: BinOp,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum BinOp {
+pub enum BinaryOp {
     Plus,
     Minus,
     Multiply,
     Divide,
 }
 
-impl TryFrom<TokenKind> for BinOp {
+impl TryFrom<TokenKind> for BinaryOp {
     type Error = String;
 
     fn try_from(value: TokenKind) -> Result<Self, Self::Error> {
         match value {
-            TokenKind::Operator(Operator::Plus) => Ok(BinOp::Plus),
-            TokenKind::Operator(Operator::Minus) => Ok(BinOp::Minus),
-            TokenKind::Operator(Operator::Star) => Ok(BinOp::Multiply),
-            TokenKind::Operator(Operator::Slash) => Ok(BinOp::Divide),
+            TokenKind::Operator(Operator::Plus) => Ok(Self::Plus),
+            TokenKind::Operator(Operator::Minus) => Ok(Self::Minus),
+            TokenKind::Operator(Operator::Star) => Ok(Self::Multiply),
+            TokenKind::Operator(Operator::Slash) => Ok(Self::Divide),
             _ => Err(format!(
                 "nicht erlaubte umwandlung in bin op token {}",
                 value
@@ -523,7 +483,7 @@ impl TryFrom<TokenKind> for CmpOp {
             TokenKind::Operator(Operator::NotEq) => Ok(CmpOp::NotEq),
             TokenKind::Operator(Operator::Greater) => Ok(CmpOp::Greater),
             TokenKind::Operator(Operator::GreaterEq) => Ok(CmpOp::GreaterEq),
-            TokenKind::Operator(Operator::Less) => Ok(CmpOp::LessEq),
+            TokenKind::Operator(Operator::Less) => Ok(CmpOp::Less),
             TokenKind::Operator(Operator::LessEq) => Ok(CmpOp::LessEq),
             _ => Err(format!(
                 "nicht erlaubte umwandlung in cmp op token {}",
@@ -531,12 +491,6 @@ impl TryFrom<TokenKind> for CmpOp {
             )),
         }
     }
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Unary {
-    pub rhs: Box<Expr>,
-    pub op: UnaryOp,
 }
 
 // NOTE(Simon): I don't know how the parser is going to handle +10 with the current grammar rules
@@ -563,23 +517,9 @@ impl TryFrom<TokenKind> for UnaryOp {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Logical {
-    pub lhs: Box<Expr>,
-    pub rhs: Box<Expr>,
-    pub op: CmpOp,
-}
-
-#[derive(Debug, PartialEq)]
 pub struct Call {
     pub callee: Box<Expr>,
     pub args: Vec<Expr>,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Variable {
-    pub name: String,
-    pub depth: Option<usize>,
-    pub function_depth: usize,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -610,25 +550,8 @@ impl Span {
 
     pub fn combine(&self, rhs: &Span) -> Self {
         Span {
-            lo: std::cmp::min(self.lo, rhs.lo),
-            hi: std::cmp::max(self.hi, rhs.hi),
-        }
-    }
-}
-
-impl Variable {
-    pub fn new_local(name: &str) -> Self {
-        Variable {
-            name: name.to_owned(),
-            depth: Some(0),
-            function_depth: 0,
-        }
-    }
-    pub fn new_global(name: &str) -> Self {
-        Variable {
-            name: name.to_owned(),
-            depth: None,
-            function_depth: 0,
+            lo: std::cmp::min(self.lo.clone(), rhs.lo.clone()),
+            hi: std::cmp::max(self.hi.clone(), rhs.hi.clone()),
         }
     }
 }

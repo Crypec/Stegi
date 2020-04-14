@@ -41,7 +41,11 @@ macro_rules! __bin_op_rule (
 				let span = lhs.span.combine(&rhs.span);
 				let op: $conv = op.kind.try_into().unwrap();
 				lhs = Expr {
-					node: ExprKind::$kind(lhs, rhs, op),
+					node: ExprKind::$kind{
+						lhs: Box::new(lhs),
+						rhs: Box::new(rhs),
+						op,
+					},
 					ty: Ty::default_infer_type(span.clone()),
 					span,
 				};
@@ -53,12 +57,12 @@ macro_rules! __bin_op_rule (
 
 macro_rules! logical_impl (
 	($name:ident, $inner:ident, $($op_pattern:pat)|*) => (
-		__bin_op_rule!($name, $inner, CmpOp, logical, $($op_pattern)|*);
+		__bin_op_rule!($name, $inner, CmpOp, Logical, $($op_pattern)|*);
 	);
 );
 macro_rules! binary_impl (
 	($name:ident, $inner:ident, $($op_pattern:pat)|*) => (
-		__bin_op_rule!($name, $inner, BinOp, binary, $($op_pattern)|*);
+		__bin_op_rule!($name, $inner, BinaryOp, Binary, $($op_pattern)|*);
 	);
 );
 
@@ -230,21 +234,30 @@ impl Parser {
 
         let cond = self.parse_expr()?;
         let body = self.parse_block(true)?;
-
-        Ok(Stmt::While(cond, body))
+        let start = cond.span.clone();
+        let end = body.span.clone();
+        Ok(Stmt::While {
+            cond,
+            body,
+            span: start.combine(&end),
+        })
     }
 
     fn parse_for_loop(&mut self) -> ParseResult<Stmt> {
         let start = self.expect(TokenKind::Keyword(Keyword::For), "Fuer")?.span;
 
-        let loop_var = self.parse_ident()?;
+        let var = self.parse_ident()?;
         self.expect(TokenKind::ColonEq, "loop")?;
 
         let it = self.parse_expr()?; // this has to be a range expr like (20..20) or an expr with type array
         let body = self.parse_block(true)?;
         let span = start.combine(&body.span);
-        let f_loop = ForLoop::new(it, loop_var, body, span);
-        Ok(Stmt::For(f_loop))
+        Ok(Stmt::For {
+            it,
+            var,
+            body,
+            span,
+        })
     }
 
     fn parse_if(&mut self) -> ParseResult<Stmt> {
@@ -291,7 +304,7 @@ impl Parser {
     }
 
     fn parse_vardef(&mut self) -> ParseResult<Stmt> {
-        let target = self.parse_ident()?;
+        let pat = self.parse_ident()?;
         let ty = match self.peek_kind()? {
             TokenKind::ColonEq => {
                 // user has not provided a type, we will try to infer it later during type inference
@@ -321,10 +334,13 @@ impl Parser {
             .expect(TokenKind::Semi, "Semicolon vor variablen Definition")?
             .span;
 
-        let span = target.span.combine(&end);
-        let local = Local::new(init, target, ty, span);
-
-        Ok(Stmt::Local(Box::new(local)))
+        let span = pat.span.combine(&end);
+        Ok(Stmt::VarDef {
+            pat,
+            init,
+            ty,
+            span,
+        })
     }
 
     fn parse_expr_stmt(&mut self) -> ParseResult<Stmt> {
@@ -342,9 +358,11 @@ impl Parser {
             ));
         }
 
-        self.expect(TokenKind::Keyword(Keyword::Break), "Stop befehl")?;
-        self.expect(TokenKind::Semi, "Stop")?;
-        Ok(Stmt::Break)
+        let start = self
+            .expect(TokenKind::Keyword(Keyword::Break), "Stop befehl")?
+            .span;
+        let end = self.expect(TokenKind::Semi, "Stop")?.span;
+        Ok(Stmt::Break(start.combine(&end)))
     }
 
     fn parse_impl_block(&mut self) -> ParseResult<Stmt> {
@@ -571,7 +589,10 @@ impl Parser {
                 let rhs = self.parse_unary()?;
                 let span = op.span.combine(&rhs.span);
                 Ok(Expr {
-                    node: ExprKind::unary(rhs, op.kind.try_into().unwrap()),
+                    node: ExprKind::Unary {
+                        rhs: Box::new(rhs),
+                        op: op.kind.try_into().unwrap(),
+                    },
                     span: span.clone(),
                     ty: Ty::default_infer_type(span),
                 })
@@ -606,7 +627,10 @@ impl Parser {
             .span;
         let span = pat.span.combine(&end);
         let expr = Expr {
-            node: ExprKind::struct_lit(pat.clone(), members),
+            node: ExprKind::Struct {
+                pat: pat.clone(),
+                members,
+            },
             span,
             ty: Ty {
                 kind: TyKind::Path(pat.clone()),
@@ -619,15 +643,14 @@ impl Parser {
     fn parse_primary(&mut self) -> ParseResult<Expr> {
         match self.peek_kind()? {
             TokenKind::Keyword(Keyword::This) => {
-                let var = Variable::new_local("selbst");
-                let span = self.advance()?.span;
-                let node = ExprKind::This(var, span);
-                Ok(Expr::new(node, span))
+                let sp = self.peek()?.span;
+                let node = ExprKind::This(self.parse_ident()?);
+                Ok(Expr::new(node, sp))
             }
-            TokenKind::Literal(lit) => {
+            TokenKind::Lit(lit) => {
                 let span = self.advance()?.span;
                 Ok(Expr {
-                    node: ExprKind::Literal(lit, span),
+                    node: ExprKind::Lit(lit, span),
                     ty: Ty::default_infer_type(span),
                     span,
                 })
@@ -707,7 +730,7 @@ impl Parser {
                     let start = self.advance()?.span;
                     let name = self.advance()?;
                     let span = start.combine(&name.span);
-                    let node = ExprKind::field(expr, self.parse_ident()?);
+                    let node = ExprKind::Field(Box::new(expr), self.parse_ident()?);
                     expr = Expr::new(node, span)
                 }
                 _ => break,
@@ -730,7 +753,10 @@ impl Parser {
         let span = callee.span.combine(&end);
         Ok(Expr {
             span,
-            node: ExprKind::call(callee, args),
+            node: ExprKind::Call {
+                callee: Box::new(callee),
+                args,
+            },
             ty: Ty::default_infer_type(span),
         })
     }
@@ -741,7 +767,10 @@ impl Parser {
         let end = self.expect(TokenKind::RBracket, "] nach Feldindex")?.span;
         let span = start.combine(&end);
         Ok(Expr {
-            node: ExprKind::index(callee, index),
+            node: ExprKind::Index {
+                callee: Box::new(callee),
+                index: Box::new(index),
+            },
             span,
             ty: Ty::default_infer_type(span),
         })
