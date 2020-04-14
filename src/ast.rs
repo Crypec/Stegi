@@ -14,6 +14,7 @@ pub trait Visitor {
 
 #[derive(Derivative)]
 #[derivative(Debug)]
+#[derive(PartialEq)]
 pub enum ExprKind {
     #[derivative(Debug = "transparent")]
     Binary(Binary),
@@ -53,13 +54,13 @@ pub enum ExprKind {
     Call(Call),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Index {
     pub callee: Box<Expr>,
     pub index: Box<Expr>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Member {
     pub ident: Ident,
     pub expr: Box<Expr>,
@@ -76,7 +77,7 @@ impl Member {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Struct {
     pub pat: Path,
     pub members: Vec<Member>,
@@ -84,6 +85,7 @@ pub struct Struct {
 
 #[derive(Derivative)]
 #[derivative(Debug)]
+#[derive(PartialEq)]
 pub enum Stmt {
     #[derivative(Debug = "transparent")]
     Expr(Expr),
@@ -125,7 +127,7 @@ impl ASTNode for Stmt {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct EnumDecl {
     pub ident: Ident,
     pub variants: Vec<Variant>,
@@ -142,20 +144,20 @@ impl EnumDecl {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Variant {
     pub span: Span,
     pub ident: Ident,
     pub data: VariantData,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum VariantData {
     Tuple(Vec<Ty>),
     Unit,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Local {
     pub ident: Ident, // TODO(Simon): this should really be a pattern
     pub init: Expr,
@@ -174,7 +176,7 @@ impl Local {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ForLoop {
     pub it: Expr,
     pub var: Ident,
@@ -193,7 +195,7 @@ impl ForLoop {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Path {
     pub segments: Vec<Ident>,
     pub span: Span,
@@ -209,28 +211,28 @@ impl Path {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Param {
     pub name: Ident,
     pub ty: TyKind,
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct StructDecl {
     pub name: Ident,
     pub fields: Vec<Field>,
     pub span: Span,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Field {
     pub name: Ident,
     pub ty: Ty,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Ident {
     pub name: String,
     pub span: Span,
@@ -265,7 +267,8 @@ impl Field {
 pub const DUMMY_TYPE_ID: usize = usize::MAX;
 
 #[derive(Derivative)]
-#[derivative(Debug, Clone)]
+#[derivative(Debug)]
+#[derive(PartialEq, Clone)]
 pub enum TyKind {
     #[derivative(Debug = "transparent")]
     Array(Box<TyKind>),
@@ -296,7 +299,7 @@ impl Default for TyKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Ty {
     pub kind: TyKind,
     pub span: Span,
@@ -346,7 +349,7 @@ impl Ty {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FnSig {
     pub name: Ident,
     pub params: Vec<(Ident, Ty)>,
@@ -363,7 +366,7 @@ impl FnSig {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FnDecl {
     pub head: FnSig,
     pub body: Block,
@@ -375,7 +378,7 @@ impl FnDecl {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
     pub span: Span,
@@ -438,7 +441,7 @@ impl Default for ExprKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Expr {
     pub node: ExprKind,
     pub ty: Ty,
@@ -469,14 +472,14 @@ impl Expr {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Binary {
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
     pub op: BinOp,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum BinOp {
     Plus,
     Minus,
@@ -501,7 +504,7 @@ impl TryFrom<TokenKind> for BinOp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum CmpOp {
     EqEq,
     NotEq,
@@ -530,7 +533,7 @@ impl TryFrom<TokenKind> for CmpOp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Unary {
     pub rhs: Box<Expr>,
     pub op: UnaryOp,
@@ -538,7 +541,7 @@ pub struct Unary {
 
 // NOTE(Simon): I don't know how the parser is going to handle +10 with the current grammar rules
 // NOTE(Simon): maybe we need to include plus
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum UnaryOp {
     Minus,
     Not,
@@ -559,20 +562,20 @@ impl TryFrom<TokenKind> for UnaryOp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Logical {
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
     pub op: CmpOp,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Call {
     pub callee: Box<Expr>,
     pub args: Vec<Expr>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Variable {
     pub name: String,
     pub depth: Option<usize>,
@@ -583,6 +586,15 @@ pub struct Variable {
 pub struct Span {
     pub lo: usize,
     pub hi: usize,
+}
+
+impl PartialEq for Span {
+    // NOTE(Simon): this seems a bit sketchy to me but we are doing it for now to use partialEq while unit testing the parser.
+    // NOTE(Simon): This makes it extemly easy because we can just use assert_eq.
+    // NOTE(Simon): We might have to find a better solution or just annotate the expected ast with the right spans.
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 impl Default for Span {
