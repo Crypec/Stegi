@@ -77,6 +77,15 @@ impl SourceMap {
     pub fn read_span_snippet(&self, s: &Span) -> Result<String, std::io::Error> {
         Ok(fs::read_to_string(&self.path)?[s.lo..s.hi].to_string())
     }
+
+    pub fn get_line_num(&self, sp: &Span) -> usize {
+        self.buf
+            .char_indices()
+            .filter(|(_, c)| *c == '\n')
+            .position(|(i, _)| i >= sp.lo)
+            .expect("failed to compute line number of err")
+            + 1
+    }
 }
 
 pub struct Session {

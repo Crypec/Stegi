@@ -83,18 +83,6 @@ impl Diagnostic {
         self.suggestions.push(suggestion.into());
     }
 
-    fn line_num(&self) -> usize {
-        self.src
-            .upgrade()
-            .unwrap()
-            .buf
-            .char_indices()
-            .filter(|(_, c)| *c == '\n')
-            .position(|(i, _)| i >= self.span.lo)
-            .expect("failed to compute line number of err")
-            + 1
-    }
-
     fn underline(&self) -> String {
         let buf_len = self.span.hi - self.span.lo;
         (0..=buf_len).map(|_| "^").collect::<String>()
@@ -144,6 +132,10 @@ impl Diagnostic {
             .find(|(_, c)| !c.is_whitespace())
             .unwrap();
         Span::new(lo, hi)
+    }
+
+    fn line_num(&self) -> usize {
+        self.src.upgrade().unwrap().get_line_num(&self.span)
     }
 
     fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
