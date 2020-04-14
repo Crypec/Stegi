@@ -196,7 +196,26 @@ impl Parser {
                 TokenKind::Keyword(Keyword::Break) => self.parse_break(break_allowed)?,
                 TokenKind::Keyword(Keyword::If) => self.parse_if()?,
                 TokenKind::LBrace => Stmt::Block(self.parse_block(break_allowed)?),
-                _ => panic!(format!("invalider token {:#?}", self.peek())), // report error because of unknown token and take EOF token into considuration
+                TokenKind::EOF => {
+                    let mut sp = self.last.as_ref().unwrap().span;
+                    sp.lo += 1;
+                    sp.hi += 1;
+                    return Err(self.span_err(
+                        "An dieser Stelle haben wir eine schliessende Klammer: `} erwartet!`",
+                        &sp,
+                    ));
+                }
+                _ => {
+                    let sp = self.last.as_ref().unwrap().span;
+                    let tk = self.peek_kind()?.to_string();
+                    return Err(self.span_err(
+                        format!(
+                            "An dieser Stelle haben wir einen unerwarteten Token gefunden: `{}`",
+                            tk
+                        ),
+                        &sp,
+                    ));
+                }
             };
             block.push(stmt);
         }
@@ -753,7 +772,6 @@ impl Parser {
 
     fn peek(&mut self) -> ParseResult<Token> {
         let sp = self.last.as_ref().unwrap().span;
-
         let elem = self
             .iter
             .peek()
