@@ -62,7 +62,7 @@ pub enum ExprKind {
     ///          ^-callee ^value
     Assign { target: Box<Expr>, value: Box<Expr> },
 
-    /// array literals are used to fill arrays with actual values
+    /// array literals are used to initialize arrays with values
     /// example: [1, 2, 3, 4, 5]
     ///           ^-create new array with values from 1 to including 5
     Array(Vec<Expr>),
