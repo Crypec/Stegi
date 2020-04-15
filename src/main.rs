@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-
 use std::path::PathBuf;
 
 mod ast;
