@@ -1,14 +1,11 @@
 use colored::*;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use ngrammatic::{CorpusBuilder, Pad};
 
 use crate::ast::*;
 use crate::errors::Diagnostic;
 use crate::lexer::*;
-use crate::session::*;
 
 // NOTE(Simon): we might need to adjust this threshold to avoid too many false positives
 const WORD_CMP_TRESHOLD: f32 = 0.2;
@@ -17,16 +14,14 @@ pub struct Typer {
     stack: Vec<HashMap<String, Ty>>,
     fn_table: HashMap<String, FnDecl>,
     ty_table: HashMap<String, StructDecl>,
-    sess: Rc<RefCell<Session>>,
 }
 
 impl Typer {
-    pub fn new(sess: Rc<RefCell<Session>>) -> Self {
+    pub fn new() -> Self {
         Self {
             stack: Vec::new(),
             fn_table: HashMap::new(),
             ty_table: HashMap::new(),
-            sess,
         }
     }
 
@@ -79,7 +74,6 @@ impl Typer {
                             sim
                         ))
                     });
-                self.sess_register(err);
                 Ty::default()
             }
         }
@@ -120,11 +114,7 @@ impl Typer {
     }
 
     fn span_err<S: Into<String>>(&mut self, desc: S, msg: S, span: &Span) -> Diagnostic {
-        self.sess.borrow_mut().span_err(desc, msg, span)
-    }
-
-    fn sess_register(&mut self, d: Diagnostic) {
-        self.sess.borrow_mut().sess_register(d);
+        todo!();
     }
 
     fn infer_branch(&mut self, b: &mut Branch) {

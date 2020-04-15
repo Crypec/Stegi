@@ -1,8 +1,7 @@
 use std::fmt;
-use std::rc::Weak;
+use std::path::PathBuf;
 
 use crate::ast::Span;
-use crate::session::*;
 
 use colored::*;
 
@@ -45,12 +44,13 @@ pub enum Severity {
 
 // TODO(Simon): do some better error handling with the weak ref to parent session
 pub struct Diagnostic {
+    pub file_name: Option<PathBuf>,
+    pub file_buf: Option<String>,
     pub desc: String,
     pub msg: String,
     pub suggestions: Vec<String>,
     pub severity: Severity,
     pub span: Span,
-    pub src: Weak<SourceMap>,
 }
 
 impl Diagnostic {
@@ -60,7 +60,8 @@ impl Diagnostic {
         suggestions: Vec<S>,
         severity: Severity,
         span: Span,
-        src: Weak<SourceMap>,
+        file_name: Option<PathBuf>,
+        file_buf: Option<String>,
     ) -> Self {
         Self {
             desc: desc.into(),
@@ -71,7 +72,8 @@ impl Diagnostic {
                 .collect::<Vec<String>>(),
             severity,
             span: span.clone(),
-            src,
+            file_name,
+            file_buf,
         }
     }
 
@@ -90,23 +92,18 @@ impl Diagnostic {
 
     fn span_snippet(&self) -> String {
         let s = self.line_span();
-        self.src.upgrade().unwrap().buf[s.lo..s.hi]
-            .trim_start()
-            .to_string()
+        let buf = &self.file_buf.as_ref().unwrap();
+        buf[s.lo..s.hi].trim_start().to_string().clone()
     }
 
     fn line_span(&self) -> Span {
-        let ref src_buf = self
-            .src
-            .upgrade()
-            .expect("Failed to get parent ptr to src map")
-            .buf;
-
         // FIXME(Simon): I haven't tested this, but it seems like this is going to work only on linux with the current solution
         // FIXME(Simon): because windows uses not only a '\n' as a newline char but combines it with a '\r'
         let mut line_offsets = vec![0];
         line_offsets.extend(
-            src_buf
+            self.file_buf
+                .as_ref()
+                .unwrap()
                 .char_indices()
                 .filter(|(_, c)| *c == '\n')
                 .map(|(i, _)| i)
@@ -126,7 +123,10 @@ impl Diagnostic {
             }
         }
         let hi = it.next().unwrap();
-        let (lo, _) = src_buf
+        let (lo, _) = self
+            .file_buf
+            .as_ref()
+            .unwrap()
             .char_indices()
             .skip(lo)
             .find(|(_, c)| !c.is_whitespace())
@@ -135,7 +135,14 @@ impl Diagnostic {
     }
 
     fn line_num(&self) -> usize {
-        self.src.upgrade().unwrap().get_line_num(&self.span)
+        self.file_buf
+            .as_ref()
+            .unwrap()
+            .char_indices()
+            .filter(|(_, c)| *c == '\n')
+            .position(|(i, _)| i >= self.span.lo)
+            .expect("failed to compute line number of err")
+            + 1
     }
 
     fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
@@ -178,7 +185,7 @@ impl fmt::Display for Diagnostic {
             "--".bold(),
             self.desc.color(color).bold(),
             "------------------------------------------".bold(),
-            self.src.upgrade().unwrap().path.to_str().unwrap().blue()
+            self.file_name.as_ref().unwrap().to_str().unwrap().blue()
         )?;
         writeln!(f)?;
         self.write_code_snippet(f, color)?;

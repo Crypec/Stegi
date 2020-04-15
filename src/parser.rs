@@ -1,7 +1,5 @@
-use std::cell::RefCell;
 use std::convert::TryInto;
 use std::iter::*;
-use std::rc::Rc;
 use std::vec::IntoIter;
 
 use itertools::multipeek;
@@ -10,13 +8,11 @@ use itertools::*;
 use super::ast::*;
 use super::errors::*;
 use super::lexer::*;
-use crate::session::*;
 
 type ParseResult<T> = Result<T, Diagnostic>;
 
 pub struct Parser {
     iter: MultiPeek<IntoIter<Token>>,
-    sess: Rc<RefCell<Session>>,
     last: Option<Token>,
 }
 
@@ -67,11 +63,10 @@ macro_rules! binary_impl (
 );
 
 impl Parser {
-    pub fn new(i: Vec<Token>, sess: Rc<RefCell<Session>>) -> Self {
+    pub fn new(i: Vec<Token>) -> Self {
         let last = i.last().cloned();
         Parser {
             iter: multipeek(i.into_iter()),
-            sess,
             // NOTE(Simon): this only gets used for error reporting if we unexpectedly reach the end of a file
             // NOTE(Simon): this could be `None`, but in this we don't ever try to parse anything beecause `has_next` in our iter implementation will return false and we will stop parsing
             last,
@@ -405,7 +400,7 @@ impl Parser {
         })
     }
 
-    pub fn parse_struct_decl(&mut self) -> ParseResult<Stmt> {
+    fn parse_struct_decl(&mut self) -> ParseResult<Stmt> {
         let start = self
             .expect(TokenKind::Keyword(Keyword::Struct), "TypenDeclaration")?
             .span;
@@ -578,7 +573,7 @@ impl Parser {
         parse_unary,
         TokenKind::Operator(Operator::Slash) | TokenKind::Operator(Operator::Star)
     );
-    pub fn parse_expr(&mut self) -> ParseResult<Expr> {
+    fn parse_expr(&mut self) -> ParseResult<Expr> {
         self.parse_and()
     }
 
@@ -839,9 +834,9 @@ impl Parser {
     }
 
     fn span_err<S: Into<String>>(&self, msg: S, span: &Span) -> Diagnostic {
-        self.sess
-            .borrow_mut()
-            .span_err("Fehler beim Parsen", &msg.into(), span)
+        todo!();
+        // self.sess
+        //     .span_err("Fehler beim Parsen", &msg.into(), span)
     }
 }
 
@@ -859,4 +854,25 @@ impl Iterator for Parser {
             None
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+
+    // fn new_path(p: String) -> Path {
+    // 	let ident = Ident::new(p, Span::default());
+    // 	Path::new(vec![ident], Span::default())
+    // }
+    // use super::*;
+    // #[test]
+    // fn parse_bin_expr() {
+    // 	let test = String::from("a + 3");
+    // 	let t_stream = Lexer::new(&test).map(Result::unwrap).collect::<Vec<_>>();
+    // 	let actual = Parser::new(t_stream).parse_expr().unwrap();
+    // 	let expected = ExprKind::Binary {
+    // 		lhs: Box::new(ExprKind::Path(new_path("a"))),
+    // 		rhs: Box::new(ExprKind::Lit(Lit::Number(3))),
+    // 		op: BinaryOp::Plus,
+    // 	}
+    // }
 }
