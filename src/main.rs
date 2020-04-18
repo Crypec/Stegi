@@ -1,7 +1,9 @@
-#![allow(dead_code)]
+// #![allow(dead_code)]
 use std::path::PathBuf;
 
+#[macro_use]
 mod ast;
+
 mod errors;
 mod lexer;
 mod parser;
