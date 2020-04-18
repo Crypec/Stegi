@@ -314,6 +314,8 @@ pub enum TyKind {
     #[derivative(Debug = "transparent")]
     Infer(usize),
 
+    Poly(Ident),
+
     #[derivative(Debug = "transparent")]
     Path(Path),
 }
@@ -772,6 +774,13 @@ pub mod dsl {
     pub fn array_ty(elem: Ty) -> Ty {
         Ty {
             kind: TyKind::Array(Box::new(elem)),
+            span: Span::default(),
+        }
+    }
+
+    pub fn poly_ty(name: Ident) -> Ty {
+        Ty {
+            kind: TyKind::Poly(name),
             span: Span::default(),
         }
     }

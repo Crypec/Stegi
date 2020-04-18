@@ -595,6 +595,11 @@ impl Parser {
                 let path = self.parse_path()?;
                 Ok(TyKind::Path(path))
             }
+            TokenKind::Dollar => {
+                self.advance()?;
+                let name = self.parse_ident()?;
+                Ok(TyKind::Poly(name))
+            }
             _ => {
                 let sp = self.advance()?.span;
                 Err(self.span_err(
@@ -1127,6 +1132,17 @@ mod tests {
             array_ty(tup_ty(vec![path_ty(path!(Foo)), path_ty(path!(Bar))])),
             array_ty(tup_ty(vec![path_ty(path!(Bar)), path_ty(path!(Foo))])),
         ]);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn parse_poly_array_ty() {
+        let test = String::from("[$T]");
+        let t_stream = Lexer::new(&test.to_string())
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
+        let actual = Parser::new(t_stream).parse_ty_specifier().unwrap();
+        let expected = array_ty(poly_ty(ident!(T)));
         assert_eq!(expected, actual);
     }
 

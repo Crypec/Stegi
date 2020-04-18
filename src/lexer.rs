@@ -26,6 +26,8 @@ pub enum TokenKind {
     LBracket,
     RBracket,
 
+    Dollar,
+
     Colon,
     Dot,
     Comma,
@@ -57,6 +59,7 @@ impl fmt::Display for TokenKind {
             TokenKind::RParen => ")",
             TokenKind::LBracket => "[",
             TokenKind::RBracket => "]",
+            TokenKind::Dollar => "$",
             TokenKind::Sep => "|",
             TokenKind::Colon => ":",
             TokenKind::Comma => ",",
@@ -333,6 +336,7 @@ impl<'a> Lexer<'a> {
             '+' => TokenKind::Operator(Operator::Plus),
             '*' => TokenKind::Operator(Operator::Star),
             ';' => TokenKind::Semi,
+            '$' => TokenKind::Dollar,
             '-' => self
                 .map_if(|p| p == '>', TokenKind::ThinArrow)
                 .unwrap_or(TokenKind::Operator(Operator::Minus)),
@@ -1023,6 +1027,22 @@ mod tests {
             TokenKind::Ident("A".to_string()),
         ];
 
+        assert_vec_eq(expected, actual);
+    }
+
+    #[test]
+    fn lex_poly_array_ty() {
+        let test = String::from("[$T]");
+
+        let actual = Lexer::new(&test)
+            .map(|r| r.unwrap().kind)
+            .collect::<Vec<_>>();
+        let expected = vec![
+            TokenKind::LBracket,
+            TokenKind::Dollar,
+            TokenKind::Ident("T".to_string()),
+            TokenKind::RBracket,
+        ];
         assert_vec_eq(expected, actual);
     }
 }
