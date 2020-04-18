@@ -1,7 +1,7 @@
 use std::fmt;
-use std::path::PathBuf;
 
 use crate::ast::Span;
+use crate::session::SourceMap;
 
 use colored::*;
 
@@ -36,16 +36,15 @@ pub enum TypeError {
     VarNameNotFound,
 }
 
+#[derive(Debug)]
 pub enum Severity {
     Warning,
     Fatal,
     CodeRed, // Reserved for only the highest severity alarms, this means we fucked something up :D
 }
 
-// TODO(Simon): do some better error handling with the weak ref to parent session
+#[derive(Debug)]
 pub struct Diagnostic {
-    pub file_name: Option<PathBuf>,
-    pub file_buf: Option<String>,
     pub desc: String,
     pub msg: String,
     pub suggestions: Vec<String>,
@@ -60,8 +59,6 @@ impl Diagnostic {
         suggestions: Vec<S>,
         severity: Severity,
         span: Span,
-        file_name: Option<PathBuf>,
-        file_buf: Option<String>,
     ) -> Self {
         Self {
             desc: desc.into(),
@@ -70,19 +67,41 @@ impl Diagnostic {
                 .into_iter()
                 .map(|s| s.into())
                 .collect::<Vec<String>>(),
+            span,
             severity,
-            span: span.clone(),
-            file_name,
-            file_buf,
         }
     }
-
-    pub fn emit(&self) {
-        println!("{}", self);
+    pub fn suggest<S: Into<String>>(self, sug: S) -> Self {
+        let mut diag = self;
+        diag.suggestions.push(sug.into());
+        diag
     }
 
-    pub fn suggest<S: Into<String>>(&mut self, suggestion: S) {
-        self.suggestions.push(suggestion.into());
+    pub fn add_suggestion<S: Into<String>>(&mut self, sug: S) {
+        self.suggestions.push(sug.into());
+    }
+}
+
+pub struct UserDiagnostic {
+    pub src_map: SourceMap,
+    pub desc: String,
+    pub msg: String,
+    pub suggestions: Vec<String>,
+    pub severity: Severity,
+    pub span: Span,
+}
+
+impl UserDiagnostic {
+    pub fn new(diag: Diagnostic, src_map: SourceMap) -> Self {
+        // TODO(Simon): there may be a better way to copy the data from Diagnostic into UserDiagnostic
+        Self {
+            src_map,
+            desc: diag.desc,
+            msg: diag.msg,
+            suggestions: diag.suggestions,
+            severity: diag.severity,
+            span: diag.span,
+        }
     }
 
     fn underline(&self) -> String {
@@ -92,7 +111,7 @@ impl Diagnostic {
 
     fn span_snippet(&self) -> String {
         let s = self.line_span();
-        let buf = &self.file_buf.as_ref().unwrap();
+        let buf = &self.src_map.buf;
         buf[s.lo..s.hi].trim_start().to_string().clone()
     }
 
@@ -101,9 +120,8 @@ impl Diagnostic {
         // FIXME(Simon): because windows uses not only a '\n' as a newline char but combines it with a '\r'
         let mut line_offsets = vec![0];
         line_offsets.extend(
-            self.file_buf
-                .as_ref()
-                .unwrap()
+            self.src_map
+                .buf
                 .char_indices()
                 .filter(|(_, c)| *c == '\n')
                 .map(|(i, _)| i)
@@ -124,9 +142,8 @@ impl Diagnostic {
         }
         let hi = it.next().unwrap();
         let (lo, _) = self
-            .file_buf
-            .as_ref()
-            .unwrap()
+            .src_map
+            .buf
             .char_indices()
             .skip(lo)
             .find(|(_, c)| !c.is_whitespace())
@@ -135,9 +152,8 @@ impl Diagnostic {
     }
 
     fn line_num(&self) -> usize {
-        self.file_buf
-            .as_ref()
-            .unwrap()
+        self.src_map
+            .buf
             .char_indices()
             .filter(|(_, c)| *c == '\n')
             .position(|(i, _)| i >= self.span.lo)
@@ -172,7 +188,7 @@ impl Diagnostic {
     }
 }
 
-impl fmt::Display for Diagnostic {
+impl fmt::Display for UserDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let color = match self.severity {
             Severity::Warning => Color::BrightYellow,
@@ -185,7 +201,7 @@ impl fmt::Display for Diagnostic {
             "--".bold(),
             self.desc.color(color).bold(),
             "------------------------------------------".bold(),
-            self.file_name.as_ref().unwrap().to_str().unwrap().blue()
+            self.src_map.path.to_str().unwrap().blue()
         )?;
         writeln!(f)?;
         self.write_code_snippet(f, color)?;
@@ -194,11 +210,5 @@ impl fmt::Display for Diagnostic {
             writeln!(f, " • {}", sug)?;
         }
         write!(f, "")
-    }
-}
-
-impl fmt::Debug for Diagnostic {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
     }
 }

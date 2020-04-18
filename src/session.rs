@@ -5,9 +5,8 @@ use crate::ast::*;
 use crate::errors::*;
 use crate::lexer::*;
 use crate::parser::*;
-use crate::typer::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceMap {
     pub path: PathBuf,
     pub buf: String,
@@ -28,24 +27,26 @@ impl Driver {
         let t_stream = Lexer::new(&self.sess.files.get(0).unwrap().buf)
             .collect::<Result<Vec<Token>, SyntaxError>>()
             .expect("failed to tokenize file");
-
+        let current_src_map = self.sess.files.get(self.sess.current).unwrap();
         let ast = Parser::new(t_stream).collect::<Vec<Result<Stmt, Diagnostic>>>();
 
         let (ast, errors): (Vec<_>, Vec<_>) = ast.into_iter().partition(Result::is_ok);
-        let mut ast: Vec<_> = ast.into_iter().map(Result::unwrap).collect();
-
+        let ast: Vec<_> = ast.into_iter().map(Result::unwrap).collect();
+        // FIXME(Simon): these should be converted into UserDiagnostics
         errors
             .into_iter()
             .map(Result::unwrap_err)
-            .for_each(|diag| ());
-        Typer::new().infer(&mut ast);
-        //dbg!(&ast);
+            .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
+            .for_each(|diag| println!("{}", diag));
+        //Typer::new().infer(&mut ast);
+        dbg!(&ast);
         let had_err = self.sess.diagnostics.iter().any(|d| match d.severity {
             Severity::Fatal | Severity::CodeRed => true,
             Severity::Warning => false,
         });
-        // if had_err {
-        //     eprintln!("Fehler beim Kompilieren gefunden. Programm wird nicht ausgefuehrt! :c\n");
+        if had_err {
+            eprintln!("Fehler beim Kompilieren gefunden. Programm wird nicht ausgefuehrt! :c\n");
+        }
         //     self.sess
         //         .borrow()
         //         .diagnostics
@@ -92,31 +93,29 @@ impl Session {
         }
     }
 
-    pub fn span_err<S: Into<String>>(&self, desc: S, msg: S, span: &Span) -> Diagnostic {
-        Diagnostic {
-            desc: desc.into(),
-            msg: msg.into(),
-            suggestions: Vec::new(),
-            span: span.clone(),
-            severity: Severity::Fatal,
-            file_name: Some(self.files.get(self.current).unwrap().path.clone()),
-            file_buf: None,
-        }
-    }
+    // pub fn span_err<S: Into<String>>(&self, desc: S, msg: S, span: &Span) -> Diagnostic {
+    //     Diagnostic {
+    //         desc: desc.into(),
+    //         msg: msg.into(),
+    //         suggestions: Vec::new(),
+    //         span: span.clone(),
+    //         severity: Severity::Fatal,
+    //         src_map: self.clone(),
+    //     }
+    // }
 
     pub fn sess_register(&mut self, diag: Diagnostic) {
         self.diagnostics.push(diag);
     }
 
-    pub fn span_warn<S: Into<String>>(&self, desc: S, msg: S, span: &Span) -> Diagnostic {
-        Diagnostic {
-            desc: desc.into(),
-            msg: msg.into(),
-            suggestions: Vec::new(),
-            span: span.clone(),
-            severity: Severity::Warning,
-            file_name: self.files.get(self.current).map(|s| s.path.clone()),
-            file_buf: None,
-        }
-    }
+    // pub fn span_warn<S: Into<String>>(&self, desc: S, msg: S, span: &Span) -> Diagnostic {
+    //     Diagnostic {
+    //         desc: desc.into(),
+    //         msg: msg.into(),
+    //         suggestions: Vec::new(),
+    //         span: span.clone(),
+    //         severity: Severity::Warning,
+    //         src_map: self.src_map.clone(),
+    //     }
+    // }
 }

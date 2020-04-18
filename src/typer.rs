@@ -68,7 +68,7 @@ impl Typer {
                     .iter()
                     .for_each(|sug| {
                         let sim = format!("{:.2}", sug.1 * 100.0);
-                        err.suggest(format!(
+                        err.add_suggestion(format!(
                             "Meintest du vielleicht `{}`? [Uebereinstimmung: {}%]",
                             sug.0.bold(),
                             sim
@@ -113,13 +113,13 @@ impl Typer {
             .collect()
     }
 
-    fn span_err<S: Into<String>>(&mut self, desc: S, msg: S, span: &Span) -> Diagnostic {
+    fn span_err<S: Into<String>>(&mut self, _desc: S, _msg: S, _span: &Span) -> Diagnostic {
         todo!();
     }
 
-    fn infer_branch(&mut self, b: &mut Branch) {
-        todo!();
-    }
+    // fn infer_branch(&mut self, _b: &mut Branch) {
+    //     todo!();
+    // }
 }
 
 impl Visitor for Typer {
@@ -135,11 +135,10 @@ impl Visitor for Typer {
                 ..
             } => self.infer_vardef(pat, init, ty),
             // TODO(Simon): typecheck branches
-            Stmt::If(b) => {
-                self.infer_branch(b);
-            }
-            Stmt::FnDecl(ref mut fn_decl) => self.infer_block(&mut fn_decl.body),
-            _ => panic!("{:#?}", s),
+            // Stmt::If(b) => {
+            //     self.infer_branch(b);
+            // }
+            _ => todo!(),
         }
     }
 
