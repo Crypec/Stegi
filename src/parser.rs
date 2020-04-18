@@ -951,7 +951,7 @@ impl Parser {
                 Ok(t.clone())
             }
             None => Err(self.span_err(
-                "Ich habe unerwartet das Ende der Datei erreicht!",
+                "Wir haben unerwartet das Ende der Datei erreicht!",
                 &self.last.as_ref().unwrap().span,
             )),
         }
@@ -1279,8 +1279,7 @@ rueckgabe selbst == 0;
     fn parse_enum_decl_unit_types() {
         let prog = r#"
 typ Wochentag = Montag | Dienstag | Mittwoch | Donnerstag | Freitag | Samstag | Sonntag
-"#
-        .to_string();
+"#;
         let actual = parse_stmt_setup(&prog);
         let expected = Stmt::EnumDecl {
             name: ident!(Wochentag),
@@ -1298,6 +1297,40 @@ typ Wochentag = Montag | Dienstag | Mittwoch | Donnerstag | Freitag | Samstag | 
         assert_eq!(actual, expected);
     }
 
+    #[test]
+    fn parse_struct_decl() {
+        let prog = r#"
+typ Liste {
+speicher: [$T],
+pos: Zahl,
+kapazitaet: Zahl,
+}
+"#;
+        let actual = parse_stmt_setup(&prog);
+
+        let expected = Stmt::StructDecl(StructDecl {
+            name: ident!(Liste),
+            fields: vec![
+                Field {
+                    name: ident!(speicher),
+                    ty: array_ty(poly_ty(ident!(T))),
+                    span: span(),
+                },
+                Field {
+                    name: ident!(pos),
+                    ty: path_ty(path!(Zahl)),
+                    span: span(),
+                },
+                Field {
+                    name: ident!(kapazitaet),
+                    ty: path_ty(path!(Zahl)),
+                    span: span(),
+                },
+            ],
+            span: span(),
+        });
+        assert_eq!(actual, expected);
+    }
     #[test]
     fn parse_enum_decl_val_types() {
         let actual = parse_stmt_setup("typ Feld = Spieler(Text) | Leer");
