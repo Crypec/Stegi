@@ -82,6 +82,8 @@ pub enum Operator {
     Slash,
     Star,
 
+    Range,
+
     Not,
     And,
     Or,
@@ -102,6 +104,7 @@ impl Operator {
             Operator::Minus => "-",
             Operator::Star => "*",
             Operator::Slash => "/",
+            Operator::Range => "bis",
             Operator::And => "und",
             Operator::Or => "oder",
             Operator::Not => "nicht",
@@ -130,6 +133,7 @@ impl FromStr for Operator {
             "-" => Ok(Operator::Minus),
             "*" => Ok(Operator::Star),
             "/" => Ok(Operator::Slash),
+            ".." | "bis" => Ok(Operator::Range),
             "nicht" | "!" => Ok(Operator::Not),
             "und" | "&&" => Ok(Operator::And),
             "oder" | "||" => Ok(Operator::Or),
@@ -189,7 +193,6 @@ pub enum Keyword {
     For,
     Break,
     Continue,
-    Range,
     If,
     Then,
     Else,
@@ -207,7 +210,6 @@ impl Keyword {
             Keyword::For => "fuer",
             Keyword::Continue => "weiter",
             Keyword::Break => "stop",
-            Keyword::Range => "bis",
             Keyword::If => "wenn",
             Keyword::Then => "dann",
             Keyword::Else => "sonst",
@@ -233,7 +235,6 @@ impl FromStr for Keyword {
             "solange" => Ok(Keyword::While),
             "rueckgabe" => Ok(Keyword::Return),
             "fuer" => Ok(Keyword::For),
-            ".." | "bis" => Ok(Keyword::Range),
             "wenn" => Ok(Keyword::If),
             "dann" => Ok(Keyword::Then),
             "sonst" => Ok(Keyword::Else),
@@ -348,7 +349,7 @@ impl<'a> Lexer<'a> {
                 .map_if(|p| p == '=', TokenKind::Operator(Operator::GreaterEq))
                 .unwrap_or(TokenKind::Operator(Operator::Greater)),
             '.' => self
-                .map_if(|p| p == '.', TokenKind::Keyword(Keyword::Range))
+                .map_if(|p| p == '.', TokenKind::Operator(Operator::Range))
                 .unwrap_or(TokenKind::Dot),
             '=' => match self.peek() {
                 Some('=') => {
@@ -363,7 +364,7 @@ impl<'a> Lexer<'a> {
             },
             ':' => match self.peek() {
                 Some(':') => {
-                    self.advance();
+                    self.advance()?;
                     TokenKind::PathSep
                 }
                 Some('=') => {
@@ -490,10 +491,12 @@ impl Iterator for Lexer<'_> {
 
 #[cfg(test)]
 mod tests {
+    use pretty_assertions::{assert_eq, assert_ne};
+
     use super::*;
 
     fn assert_vec_eq(expected: Vec<TokenKind>, actual: Vec<TokenKind>) {
-        assert_eq!(expected.len(), actual.len());
+        assert_eq!(expected.len(), actual.len(), "len expected != actual len");
         expected
             .iter()
             .zip(actual.iter())
@@ -637,7 +640,7 @@ mod tests {
 
         let expected = vec![
             TokenKind::Lit(Lit::Number(0.0)),
-            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Operator(Operator::Range),
             TokenKind::Lit(Lit::Number(10.0)),
         ];
 
@@ -658,10 +661,9 @@ mod tests {
 
         let expected = vec![
             TokenKind::Lit(Lit::Number(0.0)),
-            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Operator(Operator::Range),
             TokenKind::Lit(Lit::Number(10.0)),
         ];
-
         assert_vec_eq(expected, actual);
     }
 
@@ -675,7 +677,7 @@ mod tests {
 
         let expected = vec![
             TokenKind::Lit(Lit::Number(0.0)),
-            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Operator(Operator::Range),
             TokenKind::Lit(Lit::Number(10.0)),
         ];
 
@@ -692,7 +694,7 @@ mod tests {
 
         let expected = vec![
             TokenKind::Lit(Lit::Number(0.0)),
-            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Operator(Operator::Range),
             TokenKind::Lit(Lit::Number(10.0)),
         ];
 
@@ -963,7 +965,7 @@ mod tests {
             TokenKind::Keyword(Keyword::While),
             TokenKind::Keyword(Keyword::Return),
             TokenKind::Keyword(Keyword::For),
-            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Operator(Operator::Range),
             TokenKind::Keyword(Keyword::If),
             TokenKind::Keyword(Keyword::Then),
             TokenKind::Keyword(Keyword::Else),
@@ -974,7 +976,7 @@ mod tests {
         assert_vec_eq(expected, actual);
     }
     #[test]
-    fn lex_punctuatuin_tokens() {
+    fn lex_punctuation_tokens() {
         let test = String::from(":: : {} () [] | || , ; . .. = _ := ->");
 
         let actual = Lexer::new(&test)
@@ -994,7 +996,7 @@ mod tests {
             TokenKind::Comma,
             TokenKind::Semi,
             TokenKind::Dot,
-            TokenKind::Keyword(Keyword::Range),
+            TokenKind::Operator(Operator::Range),
             TokenKind::Eq,
             TokenKind::Underscore,
             TokenKind::ColonEq,
