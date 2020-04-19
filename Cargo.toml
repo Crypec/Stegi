@@ -16,6 +16,7 @@ pretty_assertions = "0.6.1"
 [dependencies]
 failure = "0.1.7"
 itertools = "0.9"
-derivative = "2.0.2"
+derivative = "2.1.1"
 colored = "1.9"
 ngrammatic = "0.2.0"
+unicode_reader = "1.0.0"
