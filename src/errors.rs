@@ -36,14 +36,14 @@ pub enum TypeError {
     VarNameNotFound,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Severity {
     Warning,
     Fatal,
     CodeRed, // Reserved for only the highest severity alarms, this means we fucked something up :D
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub desc: String,
     pub msg: String,

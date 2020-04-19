@@ -139,12 +139,13 @@ impl Parser {
             FnParsingMode::Method(p) => {
                 if self.peek_kind()? == TokenKind::Keyword(Keyword::This) {
                     self.advance()?;
-                    let self_ty = Ty::new(TyKind::Path(p.clone()), p.span);
-                    params.push(Param::new(
-                        Ident::new("selbst".into(), p.span),
-                        self_ty,
-                        p.span,
-                    ));
+                    let sp = p.span;
+
+                    let self_ty = Ty {
+                        kind: TyKind::Path(p),
+                        span: sp,
+                    };
+                    params.push(Param::new(Ident::new("selbst".into(), sp), self_ty, sp));
                     if self.peek_kind()? != TokenKind::RParen {
                         self.expect(TokenKind::Comma, "Nach dem `selbst` Parameter und den restlichen Parameter der Funktion haben wir ein Komma erwartet!")?;
                     }
@@ -170,12 +171,17 @@ impl Parser {
             };
         }
         let closing = self.expect(TokenKind::RParen, "Rueckgabetyp")?;
+
         let ret_ty = match self.peek_kind()? {
             TokenKind::ThinArrow => {
                 self.advance()?;
                 self.parse_ty_specifier()?
             }
-            _ => Ty::default_unit_type(closing.span),
+            _ => {
+                // FIXME(Simon): fix the span if we manually insert the return type of the function
+                let sp = Span::new(closing.span.lo + 4, closing.span.hi + 6);
+                Ty::default_unit_type(sp)
+            }
         };
         Ok(FnSig::new(name, params, ret_ty))
     }
@@ -245,6 +251,7 @@ impl Parser {
         let body = self.parse_block(BlockParsingMode::Loop)?;
         let span = start.combine(&body.span);
         Ok(Stmt::For {
+            ty: Ty::default_infer_type(it.span),
             it,
             var,
             body,
@@ -361,8 +368,8 @@ impl Parser {
         let ty = match self.peek_kind()? {
             TokenKind::ColonEq => {
                 // user has not provided a type, we will try to infer it later during type inference
-                let infer_span = self.advance()?.span;
-                Ty::default_infer_type(infer_span)
+                self.advance()?;
+                Ty::default_infer_type(pat.span)
             }
             TokenKind::Colon => {
                 // user has provided a concrete type, we will validate during type anlysis
@@ -775,7 +782,7 @@ impl Parser {
             TokenKind::Lit(lit) => {
                 let span = self.advance()?.span;
                 Ok(Expr {
-                    node: ExprKind::Lit(lit, span),
+                    node: ExprKind::Lit(lit),
                     ty: Ty::default_infer_type(span),
                     span,
                 })

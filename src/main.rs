@@ -1,3 +1,4 @@
+#![warn(clippy::pendantic)]
 use std::path::PathBuf;
 
 #[macro_use]
@@ -11,9 +12,6 @@ mod typer;
 
 #[macro_use]
 extern crate failure;
-
-#[macro_use]
-extern crate derivative;
 
 use self::session::*;
 
