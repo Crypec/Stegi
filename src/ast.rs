@@ -1,5 +1,6 @@
 use super::lexer::*;
 use crate::errors::*;
+use crate::typer::Ty;
 use std::convert::TryFrom;
 
 pub trait ASTNode {
@@ -160,6 +161,7 @@ pub enum Stmt {
 
     FnDecl(FnDecl),
     StructDecl(StructDecl),
+
     ImplBlock {
         target: Path,
         fn_decls: Vec<FnDecl>,
@@ -290,91 +292,6 @@ impl Field {
 }
 
 pub const DUMMY_TYPE_ID: usize = usize::MAX;
-
-#[derive(Derivative)]
-#[derivative(Debug)]
-#[derive(PartialEq, Clone)]
-pub enum TyKind {
-    #[derivative(Debug = "transparent")]
-    Array(Box<Ty>),
-
-    Struct(Path),
-
-    Enum(Path),
-
-    #[derivative(Debug = "transparent")]
-    Tup(Vec<Ty>),
-
-    Num,
-
-    Bool,
-
-    Text,
-
-    #[derivative(Debug = "transparent")]
-    Infer(usize),
-
-    Poly(Ident),
-
-    #[derivative(Debug = "transparent")]
-    Path(Path),
-}
-
-impl Default for TyKind {
-    fn default() -> Self {
-        TyKind::Tup(Vec::new())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Ty {
-    pub kind: TyKind,
-    pub span: Span,
-}
-
-impl Default for Ty {
-    fn default() -> Self {
-        Self {
-            kind: TyKind::default(),
-            span: Span::default(),
-        }
-    }
-}
-
-impl Ty {
-    pub fn default_unit_type(start: Span) -> Self {
-        Ty {
-            kind: TyKind::Tup(Vec::new()),
-            // TODO(Simon): are these correct and do we really need these
-            span: Span::new(start.lo + 4, start.hi + 6),
-        }
-    }
-
-    pub fn default_infer_type(span: Span) -> Self {
-        Self {
-            kind: TyKind::Infer(DUMMY_TYPE_ID),
-            span,
-        }
-    }
-
-    pub fn new_unit(kind: Ty, span: Span) -> Self {
-        Self {
-            kind: TyKind::Tup(vec![kind]), // NOTE(Simon): maybe we dont even need this, but I think it is going to make type checking easier later on
-            span,
-        }
-    }
-
-    pub fn new(kind: TyKind, span: Span) -> Self {
-        Self { kind, span }
-    }
-
-    pub fn is_unit(&self) -> bool {
-        match self.kind {
-            TyKind::Tup(ref t) => t.len() == 1,
-            _ => false,
-        }
-    }
-}
 
 #[derive(Debug, PartialEq)]
 pub struct FnSig {
