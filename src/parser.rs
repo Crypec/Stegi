@@ -5,9 +5,10 @@ use std::vec::IntoIter;
 use itertools::multipeek;
 use itertools::*;
 
-use super::ast::*;
-use super::errors::*;
-use super::lexer::*;
+use crate::ast::*;
+use crate::errors::*;
+use crate::lexer::*;
+use crate::typer::{Ty, TyKind};
 
 type ParseResult<T> = Result<T, Diagnostic>;
 
@@ -1002,7 +1003,7 @@ impl Iterator for Parser {
 #[cfg(test)]
 mod tests {
 
-    use pretty_assertions::{assert_eq, assert_ne};
+    use pretty_assertions::assert_eq;
 
     use super::*;
     use crate::ast::dsl::*;
