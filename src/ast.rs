@@ -267,7 +267,7 @@ impl TryFrom<Token> for Ident {
     type Error = Diagnostic;
     fn try_from(t: Token) -> Result<Ident, Self::Error> {
         match t.kind {
-            TokenKind::Ident(name) => Ok(Ident::new(name.to_owned(), t.span)),
+            TokenKind::Ident(name) => Ok(Ident::new(name, t.span)),
             _ => Err(Diagnostic::new(
                 "Interner Fehler",
                 format!("Invalide Umwandlung von `{:#?}` zu `Ident`", t).as_str(),
@@ -356,7 +356,7 @@ impl Expr {
         Self {
             node,
             span,
-            ty: Ty::default_infer_type(span.clone()),
+            ty: Ty::default_infer_type(span),
         }
     }
 
@@ -364,7 +364,7 @@ impl Expr {
         Self {
             node: ExprKind::Tup(Vec::new()),
             span,
-            ty: Ty::default_infer_type(span.clone()),
+            ty: Ty::default_infer_type(span),
         }
     }
 }
@@ -489,8 +489,8 @@ impl Span {
 
     pub fn combine(&self, rhs: &Span) -> Self {
         Span {
-            lo: std::cmp::min(self.lo.clone(), rhs.lo.clone()),
-            hi: std::cmp::max(self.hi.clone(), rhs.hi.clone()),
+            lo: std::cmp::min(self.lo, rhs.lo),
+            hi: std::cmp::max(self.hi, rhs.hi),
         }
     }
 }
@@ -499,6 +499,7 @@ impl Span {
 #[cfg(test)]
 pub mod dsl {
     use super::*;
+    use crate::typer::TyKind;
 
     macro_rules! ident {
         ($name:ident) => {

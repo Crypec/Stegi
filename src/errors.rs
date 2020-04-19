@@ -112,7 +112,7 @@ impl UserDiagnostic {
     fn span_snippet(&self) -> String {
         let s = self.line_span();
         let buf = &self.src_map.buf;
-        buf[s.lo..s.hi].trim_start().to_string().clone()
+        buf[s.lo..s.hi].trim_start().to_string()
     }
 
     fn line_span(&self) -> Span {

@@ -215,7 +215,7 @@ impl Parser {
             TokenKind::LBrace => Ok(Stmt::Block(self.parse_block(mode)?)),
             _ => {
                 let p = self.advance()?;
-                return Err(self.span_err(format!("Unerwarteter Token gefunden: `{}` gefunden! An dieser Stelle haben wir einen der folgenden Token erwartet: `selbst`, `solange`, `fuer`, `rueckgabe`, `weiter`, `stop`, `wenn`, `{{`!", p.kind).as_str(), &p.span));
+                Err(self.span_err(format!("Unerwarteter Token gefunden: `{}` gefunden! An dieser Stelle haben wir einen der folgenden Token erwartet: `selbst`, `solange`, `fuer`, `rueckgabe`, `weiter`, `stop`, `wenn`, `{{`!", p.kind).as_str(), &p.span))
             }
         }
     }
@@ -227,7 +227,7 @@ impl Parser {
         let cond = self.parse_expr()?;
 
         let body = self.parse_block(BlockParsingMode::Loop)?;
-        let end = body.span.clone();
+        let end = body.span;
         Ok(Stmt::While {
             cond,
             body,
@@ -680,11 +680,11 @@ impl Parser {
         if self.peek_kind()? == TokenKind::Operator(Operator::Range) {
             self.advance()?;
             let rhs = self.parse_assign()?;
-            let sp = lhs.span.combine(&rhs.span);
+            let span = lhs.span.combine(&rhs.span);
             return Ok(Expr {
                 node: ExprKind::Range(Box::new(lhs), Box::new(rhs)),
-                span: sp.clone(),
-                ty: Ty::default_infer_type(sp),
+                span,
+                ty: Ty::default_infer_type(span),
             });
         }
         Ok(lhs)
@@ -718,14 +718,14 @@ impl Parser {
             TokenKind::Operator(Operator::Not) | TokenKind::Operator(Operator::Minus) => {
                 let op = self.advance()?;
                 let rhs = self.parse_unary()?;
-                let sp = op.span.combine(&rhs.span);
+                let span = op.span.combine(&rhs.span);
                 Ok(Expr {
                     node: ExprKind::Unary {
                         rhs: Box::new(rhs),
                         op: op.try_into()?,
                     },
-                    span: sp.clone(),
-                    ty: Ty::default_infer_type(sp),
+                    span,
+                    ty: Ty::default_infer_type(span),
                 })
             }
             _ => self.parse_call(),
@@ -758,10 +758,7 @@ impl Parser {
             .span;
         let span = path.span.combine(&end);
         let expr = Expr {
-            node: ExprKind::Struct {
-                path: path.clone(),
-                members,
-            },
+            node: ExprKind::Struct { path, members },
             span,
             ty: Ty::default_infer_type(span),
         };
@@ -949,7 +946,7 @@ impl Parser {
         match self.iter.next() {
             Some(t) => {
                 self.last = Some(t.clone());
-                Ok(t.clone())
+                Ok(t)
             }
             None => Err(self.span_err(
                 "Wir haben unerwartet das Ende der Datei erreicht!",
@@ -979,7 +976,7 @@ impl Parser {
             msg.into(),
             Vec::new(),
             Severity::Fatal,
-            span.clone(),
+            *span,
         )
     }
 }

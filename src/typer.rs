@@ -174,11 +174,11 @@ impl Typer {
         self.stack.push(self.stack.last().unwrap().clone());
     }
 
-    fn insert_cxt(&mut self, name: &String, ty: Ty) {
+    fn insert_cxt(&mut self, name: &str, ty: Ty) {
         self.stack.last_mut().unwrap().insert(name.to_string(), ty);
     }
 
-    fn lookup_cxt(&self, name: &String) -> Option<Ty> {
+    fn lookup_cxt(&self, name: &str) -> Option<Ty> {
         self.stack.last().unwrap().get(name).cloned()
     }
 
@@ -186,7 +186,7 @@ impl Typer {
         self.stack.pop();
     }
 
-    fn find_similar_var_names(&mut self, needle: &String) -> Vec<(String, f32)> {
+    fn find_similar_var_names(&mut self, needle: &str) -> Vec<(String, f32)> {
         let mut corpus = CorpusBuilder::new().arity(2).pad_full(Pad::Auto).finish();
         self.stack
             .last()

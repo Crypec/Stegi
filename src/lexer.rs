@@ -1,8 +1,12 @@
 use std::fmt;
+use std::iter::*;
+use std::str::Chars;
 use std::str::FromStr;
 
 use super::errors::*;
 use crate::ast::Span;
+use itertools::multipeek;
+use itertools::*;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TokenKind {
@@ -255,21 +259,23 @@ pub struct Token {
 }
 
 pub struct Lexer<'a> {
-    src_buf: &'a String,
+    iter: MultiPeek<Chars<'a>>,
+    src_buf: &'a str,
     cursor: usize,
     line: usize,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(data: &'a String) -> Self {
+    pub fn new(data: &'a str) -> Self {
         Lexer {
+            iter: multipeek(data.chars()),
             src_buf: data,
             cursor: 0,
             line: 1,
         }
     }
     fn advance(&mut self) -> Option<char> {
-        let c = self.src_buf.chars().nth(self.cursor);
+        let c = self.iter.next();
         if let Some('\n') = c {
             self.line += 1;
         }
@@ -278,11 +284,16 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn peek(&mut self) -> Option<char> {
-        self.src_buf.chars().nth(self.cursor)
+        let elem = self.iter.peek().cloned();
+        self.iter.reset_peek();
+        elem
     }
 
     fn peek_next(&mut self) -> Option<char> {
-        self.src_buf.chars().nth(self.cursor + 1)
+        self.iter.peek();
+        let elem = self.iter.peek().cloned();
+        self.iter.reset_peek();
+        elem
     }
 
     fn map_if<F>(&mut self, p: F, res: TokenKind) -> Option<TokenKind>
@@ -472,7 +483,7 @@ impl<'a> Lexer<'a> {
             .map(TokenKind::Keyword)
             .or_else(|_| str::parse::<Operator>(&lexeme).map(TokenKind::Operator))
             .or_else(|_| str::parse::<Lit>(&lexeme).map(TokenKind::Lit))
-            .unwrap_or(TokenKind::Ident(lexeme.clone()))
+            .unwrap_or(TokenKind::Ident(lexeme))
     }
 
     fn is_at_end(&mut self) -> bool {
@@ -509,7 +520,7 @@ mod tests {
 
     #[test]
     fn lex_fn_header() {
-        let test = String::from("fn test(x: Zahl) -> [Text]");
+        let test = "fn test(x: Zahl) -> [Text]";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -533,7 +544,7 @@ mod tests {
     }
     #[test]
     fn lex_vardef_untyped() {
-        let test = String::from("a := 20;");
+        let test = "a := 20;";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -551,7 +562,7 @@ mod tests {
 
     #[test]
     fn lex_vardef_typed() {
-        let test = String::from("a : [Zahl] = 20;");
+        let test = "a : [Zahl] = 20;";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -573,7 +584,7 @@ mod tests {
 
     #[test]
     fn lex_struct_decl() {
-        let test = String::from("typ Test {a: Foo, b: Bar}");
+        let test = "typ Test {a: Foo, b: Bar}";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -598,7 +609,7 @@ mod tests {
 
     #[test]
     fn lex_enum_decl() {
-        let test = String::from("typ Bool = Wahr | Falsch");
+        let test = "typ Bool = Wahr | Falsch";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -618,7 +629,7 @@ mod tests {
 
     #[test]
     fn lex_impl_block_decl() {
-        let test = String::from("impl Foo {}");
+        let test = "impl Foo {}";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -636,7 +647,7 @@ mod tests {
 
     #[test]
     fn lex_range_dotted_no_space() {
-        let test = String::from("0..10");
+        let test = "0..10";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -657,7 +668,7 @@ mod tests {
         // this is not expected to work because we see 0 as a number and bis10 as an ident
         // Solution 1: would be to insert a space like so 0 bis 10.
         // Solution 2: use the dot operator for ranges: 0..10
-        let test = String::from("0bis10");
+        let test = "0bis10";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -673,7 +684,7 @@ mod tests {
 
     #[test]
     fn lex_range_keyword_space() {
-        let test = String::from("0 bis 10");
+        let test = "0 bis 10";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -690,7 +701,7 @@ mod tests {
 
     #[test]
     fn lex_range_dotted_space() {
-        let test = String::from("0 .. 10");
+        let test = "0 .. 10";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -707,7 +718,7 @@ mod tests {
 
     #[test]
     fn lex_number_int() {
-        let test = String::from("0 100 420 6969 3141");
+        let test = "0 100 420 6969 3141";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -725,7 +736,7 @@ mod tests {
     }
     #[test]
     fn lex_number_float() {
-        let test = String::from("0.1 100.10 420.123 6969.2 3141.1");
+        let test = "0.1 100.10 420.123 6969.2 3141.1";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -744,7 +755,7 @@ mod tests {
 
     #[test]
     fn lex_expr_num_1() {
-        let test = String::from("-1-(a + 20)");
+        let test = "-1-(a + 20)";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -766,7 +777,7 @@ mod tests {
 
     #[test]
     fn lex_expr_num_2() {
-        let test = String::from("-1-(a * 20 / 2)");
+        let test = "-1-(a * 20 / 2)";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -790,7 +801,7 @@ mod tests {
 
     #[test]
     fn lex_expr_num_comment() {
-        let test = String::from("-1-(a * 20 // 2)");
+        let test = "-1-(a * 20 // 2)";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -811,7 +822,7 @@ mod tests {
 
     #[test]
     fn lex_expr_and_op() {
-        let test = String::from("!wahr && falsch");
+        let test = "!wahr && falsch";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -828,7 +839,7 @@ mod tests {
     }
     #[test]
     fn lex_expr_and_keyword() {
-        let test = String::from("!wahr und falsch");
+        let test = "!wahr und falsch";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -844,7 +855,7 @@ mod tests {
     }
     #[test]
     fn lex_bool_ops() {
-        let test = String::from("und || && oder !nicht");
+        let test = "und || && oder !nicht";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -863,7 +874,7 @@ mod tests {
 
     #[test]
     fn lex_bool_ops_no_space() {
-        let test = String::from("und||&&oder!nicht");
+        let test = "und||&&oder!nicht";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -882,7 +893,7 @@ mod tests {
 
     #[test]
     fn lex_math_ops() {
-        let test = String::from("+ - * /");
+        let test = "+ - * /";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -899,7 +910,7 @@ mod tests {
 
     #[test]
     fn lex_math_ops_no_space() {
-        let test = String::from("+-/**/");
+        let test = "+-/**/";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -918,9 +929,8 @@ mod tests {
 
     #[test]
     fn lex_cmp_ops() {
-        let test = String::from(
-            "groesser_gleich ungleich != gleich  == > groesser < kleiner kleiner_gleich >= <= =>",
-        );
+        let test =
+            "groesser_gleich ungleich != gleich  == > groesser < kleiner kleiner_gleich >= <= =>";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -949,9 +959,8 @@ mod tests {
 
     #[test]
     fn lex_keywords() {
-        let test = String::from(
-            "funktion fun fn typ Typ selbst solange rueckgabe fuer bis wenn dann sonst stop weiter",
-        );
+        let test =
+            "funktion fun fn typ Typ selbst solange rueckgabe fuer bis wenn dann sonst stop weiter";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -981,7 +990,7 @@ mod tests {
     }
     #[test]
     fn lex_punctuation_tokens() {
-        let test = String::from(":: : {} () [] | || , ; . .. = _ := ->");
+        let test = ":: : {} () [] | || , ; . .. = _ := ->";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -1012,7 +1021,7 @@ mod tests {
 
     #[test]
     fn lex_idents() {
-        let test = String::from("foo bar_10 test_1_1 bar__f00 D3ADB33F 10A");
+        let test = "foo bar_10 test_1_1 bar__f00 D3ADB33F 10A";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
@@ -1032,7 +1041,7 @@ mod tests {
 
     #[test]
     fn lex_poly_array_ty() {
-        let test = String::from("[$T]");
+        let test = "[$T]";
 
         let actual = Lexer::new(&test)
             .map(|r| r.unwrap().kind)
