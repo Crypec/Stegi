@@ -2,6 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use crate::typer::*;
+
 use crate::ast::*;
 use crate::errors::*;
 use crate::lexer::*;
@@ -27,25 +29,26 @@ impl Driver {
     pub fn compile(&mut self) {
         let current_src_map = self.sess.files.get(self.sess.current).unwrap();
         let now = Instant::now();
-        let t_stream = Lexer::new(&self.sess.files.get(0).unwrap().buf)
+        let buf = &self.sess.files.first().unwrap().buf;
+        let t_stream = Lexer::new(&buf)
             .collect::<Result<Vec<Token>, SyntaxError>>()
             .expect("failed to tokenize file");
         let ast = Parser::new(t_stream).collect::<Vec<Result<Stmt, Diagnostic>>>();
         println!("{:#?}", now.elapsed());
         let (ast, errors): (Vec<_>, Vec<_>) = ast.into_iter().partition(Result::is_ok);
-        let ast: Vec<_> = ast.into_iter().map(Result::unwrap).collect();
+        let mut ast: Vec<_> = ast.into_iter().map(Result::unwrap).collect();
         // FIXME(Simon): these should be converted into UserDiagnostics
         errors
             .into_iter()
             .map(Result::unwrap_err)
             .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
             .for_each(|diag| println!("{}", diag));
-        //Typer::new().infer(&mut ast);
+        TypeAnnotator::new().annotate(&mut ast);
+        dbg!(&ast);
         let had_err = self.sess.diagnostics.iter().any(|d| match d.severity {
             Severity::Fatal | Severity::CodeRed => true,
             Severity::Warning => false,
         });
-        println!("{:#?}", ast.first().unwrap());
         if had_err {
             eprintln!("Fehler beim Kompilieren gefunden. Programm wird nicht ausgefuehrt! :c\n");
         }
