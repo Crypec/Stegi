@@ -1,24 +1,34 @@
-use colored::*;
 use std::collections::HashMap;
 
-use ngrammatic::{CorpusBuilder, Pad};
+use crate::errors::Severity;
+use crate::lexer::*;
+
+use derivative::*;
+//use ngrammatic::{CorpusBuilder, Pad}; TODO(Simon): reimplement
 
 use crate::ast::*;
 use crate::errors::Diagnostic;
-use crate::lexer::*;
+
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq, Clone)]
+pub struct Ty {
+    pub kind: TyKind,
+
+    #[derivative(Debug = "ignore")]
+    pub span: Span,
+}
+
+enum TyCons {
+    Eq(Ty, Ty),
+}
 
 pub const DUMMY_TYPE_ID: usize = usize::MAX;
 
 #[derive(Derivative)]
-#[derivative(Debug)]
-#[derive(PartialEq, Clone)]
+#[derivative(Debug, PartialEq, Clone)]
 pub enum TyKind {
     #[derivative(Debug = "transparent")]
     Array(Box<Ty>),
-
-    Struct(Path),
-
-    Enum(Path),
 
     #[derivative(Debug = "transparent")]
     Tup(Vec<Ty>),
@@ -29,42 +39,31 @@ pub enum TyKind {
 
     Text,
 
-    #[derivative(Debug = "transparent")]
     Infer(usize),
 
+    #[derivative(Debug = "transparent")]
     Poly(Ident),
 
     #[derivative(Debug = "transparent")]
     Path(Path),
 }
 
-impl Default for TyKind {
-    fn default() -> Self {
-        TyKind::Tup(Vec::new())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Ty {
-    pub kind: TyKind,
-    pub span: Span,
-}
-
-impl Default for Ty {
-    fn default() -> Self {
-        Self {
-            kind: TyKind::default(),
-            span: Span::default(),
+impl TyKind {
+    fn from_lit(l: &Lit) -> Self {
+        match l {
+            Lit::Number(_) => TyKind::Num,
+            Lit::String(_) => TyKind::Text,
+            Lit::Bool(_) => TyKind::Bool,
         }
     }
 }
 
 impl Ty {
-    pub fn default_unit_type(start: Span) -> Self {
+    pub fn default_unit_type(span: Span) -> Self {
         Ty {
             kind: TyKind::Tup(Vec::new()),
             // TODO(Simon): are these correct and do we really need these
-            span: Span::new(start.lo + 4, start.hi + 6),
+            span,
         }
     }
 
@@ -74,196 +73,191 @@ impl Ty {
             span,
         }
     }
-
-    pub fn new_unit(kind: Ty, span: Span) -> Self {
-        Self {
-            kind: TyKind::Tup(vec![kind]), // NOTE(Simon): maybe we dont even need this, but I think it is going to make type checking easier later on
-            span,
-        }
-    }
-
-    pub fn new(kind: TyKind, span: Span) -> Self {
-        Self { kind, span }
-    }
-
-    pub fn is_unit(&self) -> bool {
-        match self.kind {
-            TyKind::Tup(ref t) => t.len() == 1,
-            _ => false,
-        }
-    }
 }
 
 // NOTE(Simon): we might need to adjust this threshold to avoid too many false positives
 const WORD_CMP_TRESHOLD: f32 = 0.2;
 
-pub struct Typer {
-    stack: Vec<HashMap<String, Ty>>,
-    fn_table: HashMap<String, FnDecl>,
-    ty_table: HashMap<String, StructDecl>,
+pub struct TypeAnnotator {
+    index: usize,
+    stack: Vec<HashMap<String, TyKind>>,
+    diagnostics: Vec<Diagnostic>,
 }
 
-impl Typer {
+impl TypeAnnotator {
     pub fn new() -> Self {
         Self {
+            index: 0,
             stack: Vec::new(),
-            fn_table: HashMap::new(),
-            ty_table: HashMap::new(),
+            diagnostics: Vec::new(),
         }
     }
 
-    pub fn infer(&mut self, ast: &mut Vec<Stmt>) {
-        self.stack.push(HashMap::new());
-        ast.iter_mut().for_each(|stmt| stmt.accept(self));
+    fn new_ty_id(&mut self) -> TyKind {
+        let id = self.index;
+        self.index += 1;
+        TyKind::Infer(id)
     }
 
-    fn infer_block(&mut self, b: &mut Block) {
+    pub fn annotate(&mut self, ast: &mut Vec<Stmt>) -> Vec<Diagnostic> {
+        ast.into_iter().for_each(|s| s.accept(self));
+        self.diagnostics.clone()
+    }
+
+    pub fn annotate_block(&mut self, block: &mut Block) {
         self.make_cxt();
-        b.stmts.iter_mut().for_each(|stmt| stmt.accept(self));
-        self.drop_cxt();
-    }
-    fn infer_vardef(&mut self, pat: &mut Ident, init: &mut Expr, ty: &mut Ty) {
-        init.accept(self);
-        self.insert_cxt(&pat.name, ty.clone());
-
-        // if the user has not provided a type, we set it to the inferred expr type
-        // but if the user has specified a type, we will use the specified type because it is
-        // more likely it is correct, we are  going to emit in an error during the
-        // type checking phase if the types are not compatible
-        if let TyKind::Infer(_) = ty.kind {
-            *ty = init.ty.clone();
+        for stmt in &mut block.stmts {
+            stmt.accept(self);
         }
+        self.destroy_cxt();
     }
 
-    fn infer_var(&mut self, p: &Path) -> Ty {
-        // can never fail because we only got there because len of p is 1, otherwiese we have to infer an enum
-        let var = p.segments.first().unwrap();
-        match self.lookup_cxt(&var.name) {
-            Some(ty) => ty,
-            None => {
-                let mut err = self.span_err(
-                    "Typenfehler",
-                    format!(
-                        "Wir haben die Variable `{}` nicht gefunden!",
-                        var.name.bold()
-                    )
-                    // I don't get why we need the conversion here, String implements Into String
-                    .as_str(),
-                    &var.span,
-                );
-                self.find_similar_var_names(&var.name)
-                    .iter()
-                    .for_each(|sug| {
-                        let sim = format!("{:.2}", sug.1 * 100.0);
-                        err.add_suggestion(format!(
-                            "Meintest du vielleicht `{}`? [Uebereinstimmung: {}%]",
-                            sug.0.bold(),
-                            sim
-                        ))
-                    });
-                Ty::default()
-            }
+    pub fn annotate_fn(&mut self, fn_decl: &mut FnDecl) {
+        for param in &mut fn_decl.head.params {
+            self.insert_cxt(param.name.lexeme.clone(), param.ty.kind.clone());
         }
+        self.annotate_block(&mut fn_decl.body);
     }
 
-    fn infer_enum_arm(&self) {
-        todo!()
+    pub fn make_cxt(&mut self) {
+        let env = match self.stack.last() {
+            Some(env) => env.clone(),
+            None => HashMap::new(),
+        };
+        self.stack.push(env);
     }
 
-    fn make_cxt(&mut self) {
-        self.stack.push(self.stack.last().unwrap().clone());
-    }
-
-    fn insert_cxt(&mut self, name: &str, ty: Ty) {
-        self.stack.last_mut().unwrap().insert(name.to_string(), ty);
-    }
-
-    fn lookup_cxt(&self, name: &str) -> Option<Ty> {
-        self.stack.last().unwrap().get(name).cloned()
-    }
-
-    fn drop_cxt(&mut self) {
+    pub fn destroy_cxt(&mut self) {
         self.stack.pop();
     }
 
-    fn find_similar_var_names(&mut self, needle: &str) -> Vec<(String, f32)> {
-        let mut corpus = CorpusBuilder::new().arity(2).pad_full(Pad::Auto).finish();
-        self.stack
-            .last()
-            .unwrap()
-            .iter()
-            .for_each(|(k, _)| corpus.add_text(k));
-        corpus
-            .search(needle, WORD_CMP_TRESHOLD)
-            .into_iter()
-            .map(|res| (res.text, res.similarity))
-            .collect()
+    fn get_local(&mut self, name: &str) -> Option<TyKind> {
+        self.stack.last().unwrap().get(name).cloned()
     }
 
-    fn span_err<S: Into<String>>(&mut self, _desc: S, _msg: S, _span: &Span) -> Diagnostic {
-        todo!();
+    fn insert_cxt(&mut self, name: String, tk: TyKind) {
+        self.stack.last_mut().unwrap().insert(name.to_string(), tk);
     }
 
-    // fn infer_branch(&mut self, _b: &mut Branch) {
-    //     todo!();
-    // }
+    fn span_err<S: Into<String>>(&mut self, msg: S, span: Span) {
+        self.diagnostics.push(Diagnostic::new(
+            "Typenfehler",
+            &msg.into(),
+            Vec::new(),
+            Severity::Fatal,
+            span,
+        ))
+    }
 }
 
-impl Visitor for Typer {
+impl Visitor for TypeAnnotator {
     type Result = ();
 
-    fn visit_stmt(&mut self, s: &mut Stmt) -> Self::Result {
-        match s {
-            Stmt::Block(ref mut b) => self.infer_block(b),
-            Stmt::VarDef {
-                ref mut pat,
-                ref mut init,
-                ref mut ty,
-                ..
-            } => self.infer_vardef(pat, init, ty),
-            // TODO(Simon): typecheck branches
-            // Stmt::If(b) => {
-            //     self.infer_branch(b);
-            // }
+    fn visit_expr(&mut self, e: &mut Expr) -> Self::Result {
+        match e.node {
+            ExprKind::Lit(ref l) => {
+                e.ty = Ty {
+                    kind: TyKind::from_lit(l),
+                    span: e.span,
+                }
+            }
+            ExprKind::Path(ref p) => {
+                if p.len() == 1 {
+                    let seg = p.first().unwrap();
+                    e.ty.kind = match self.get_local(&seg.lexeme) {
+                        Some(tk) => tk,
+                        None => {
+                            self.span_err(
+                                format!("Wir konnten die Variable `{}`, nicht finden!", seg.lexeme),
+                                seg.span,
+                            );
+                            return;
+                        }
+                    };
+                }
+            }
             _ => todo!(),
         }
     }
 
-    fn visit_expr(&mut self, e: &mut Expr) -> Self::Result {
-        match e.node {
-            ExprKind::Binary {
-                ref mut lhs,
-                ref mut rhs,
+    fn visit_stmt(&mut self, s: &mut Stmt) -> Self::Result {
+        match s {
+            Stmt::FnDecl(ref mut fn_decl) => {
+                self.annotate_fn(fn_decl);
+            }
+            Stmt::Block(b) => {
+                self.annotate_block(b);
+            }
+            Stmt::VarDef {
+                ref pat,
+                ref mut ty,
+                ref mut init,
                 ..
             } => {
-                lhs.accept(self);
-                rhs.accept(self);
+                let id = self.new_ty_id();
+
+                // NOTE(Simon): if the user has not provied a type for the vardef we assign it a new type id and try to infer it
+                // NOTE(Simon): if a type is specified we assume the user has made the correct choice and leave his type in place
+                if let TyKind::Infer(_) = ty.kind {
+                    ty.kind = id.clone();
+                }
+                self.insert_cxt(pat.lexeme.clone(), id);
+                init.accept(self);
             }
-            ExprKind::Logical {
-                ref mut lhs,
-                ref mut rhs,
+            Stmt::Expr(ref mut e) => {
+                e.accept(self);
+            }
+            Stmt::If {
+                ref mut cond,
+                ref mut body,
+                ref mut else_branches,
+                ref mut final_branch,
                 ..
             } => {
-                lhs.accept(self);
-                rhs.accept(self);
-            }
-            ExprKind::Lit(ref lit, _) => {
-                e.ty.kind = match lit {
-                    Lit::String(_) => TyKind::Text,
-                    Lit::Bool(_) => TyKind::Bool,
-                    Lit::Number(_) => TyKind::Num,
-                };
-            }
-            ExprKind::Path(ref p) => {
-                if p.segments.len() == 1 {
-                    // unwrap can never fail
-                    self.infer_var(p);
-                } else {
-                    self.infer_enum_arm();
+                cond.accept(self);
+                self.annotate_block(body);
+                for branch in else_branches {
+                    branch.cond.accept(self);
+                    self.annotate_block(&mut branch.body);
+                }
+                if let Some(fb) = final_branch {
+                    self.annotate_block(&mut fb.body);
                 }
             }
-
-            _ => unimplemented!(),
+            Stmt::While {
+                ref mut cond,
+                ref mut body,
+                ..
+            } => {
+                cond.accept(self);
+                self.annotate_block(body);
+            }
+            Stmt::ImplBlock {
+                target: _,
+                ref mut fn_decls,
+                ..
+            } => {
+                for fn_decl in fn_decls {
+                    self.annotate_fn(fn_decl);
+                }
+            }
+            Stmt::For {
+                ref mut var,
+                ref mut it,
+                ref mut ty,
+                ref mut body,
+                ..
+            } => {
+                let id = self.new_ty_id();
+                self.insert_cxt(var.lexeme.clone(), id.clone());
+                ty.kind = id;
+                it.accept(self);
+                self.annotate_block(body);
+            }
+            Stmt::StructDecl(_) => {}
+            Stmt::EnumDecl { .. } => {} // TODO(Simon): Provide enum for type inference
+            Stmt::Ret(ref mut expr, ..) => expr.accept(self),
+            Stmt::Break(_) | Stmt::Continue(_) => {}
         }
     }
 }
