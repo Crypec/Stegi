@@ -3,6 +3,9 @@ use crate::errors::*;
 use crate::typer::Ty;
 use std::convert::TryFrom;
 
+use derivative::*;
+use std::fmt;
+
 pub trait ASTNode {
     fn accept<V: Visitor>(&mut self, visitor: &mut V) -> V::Result;
 }
@@ -14,7 +17,8 @@ pub trait Visitor {
     fn visit_expr(&mut self, expr: &mut Expr) -> Self::Result;
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Derivative)]
+#[derivative(PartialEq, Debug, Clone)]
 pub enum ExprKind {
     /// normal binary expression, only used for numeric expressions
     /// example: a      +     42
@@ -47,10 +51,13 @@ pub enum ExprKind {
     /// a tuple expression is just a collection of other expressions
     /// example: (20,    20)
     ///           ^-expr ^-expr
+    #[derivative(Debug = "transparent")]
     Tup(Vec<Expr>),
+
     /// variable reference, possibly containing `::` to refer to types in other moduels
     /// example: foo::bar
     ///          ^^^-segment
+    #[derivative(Debug = "transparent")]
     Path(Path),
 
     /// used to represent all sorts of index expressions
@@ -67,6 +74,8 @@ pub enum ExprKind {
     /// array literals are used to initialize arrays with values
     /// example: [1, 2, 3, 4, 5]
     ///           ^-create new array with values from 1 to including 5
+
+    #[derivative(Debug = "transparent")]
     Array(Vec<Expr>),
 
     /// a range pattern
@@ -79,7 +88,8 @@ pub enum ExprKind {
     ///          ^-num literal
     /// example: "foo"
     ///          ^-string/text literal
-    Lit(Lit, Span),
+    #[derivative(Debug = "transparent")]
+    Lit(Lit),
 
     /// access of a named struct field like a.b
     /// example: a  .    b
@@ -102,10 +112,13 @@ pub enum ExprKind {
     Call { callee: Box<Expr>, args: Vec<Expr> },
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq, Clone)]
 pub struct Member {
     pub name: Ident,
     pub init: Expr,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
@@ -119,7 +132,8 @@ impl Member {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative, PartialEq)]
+#[derivative(Debug)]
 pub enum Stmt {
     Expr(Expr),
 
@@ -127,9 +141,12 @@ pub enum Stmt {
         pat: Ident, // TODO(Simon): this should really be a pattern to allow for destructoring
         init: Expr,
         ty: Ty,
+
+        #[derivative(Debug = "ignore")]
         span: Span,
     },
 
+    #[derivative(Debug = "transparent")]
     Block(Block),
 
     If {
@@ -137,19 +154,26 @@ pub enum Stmt {
         body: Block,
         else_branches: Vec<ElseBranch>,
         final_branch: Option<FinalBranch>,
+
+        #[derivative(Debug = "ignore")]
         span: Span,
     },
 
     While {
         cond: Expr,
         body: Block,
+
+        #[derivative(Debug = "ignore")]
         span: Span,
     },
 
     For {
-        it: Expr,
         var: Ident,
+        it: Expr,
+        ty: Ty, // FIXME(Simon): this is a hack to capture the value of the iter variable as a type
         body: Block,
+
+        #[derivative(Debug = "ignore")]
         span: Span,
     },
 
@@ -159,31 +183,45 @@ pub enum Stmt {
 
     Ret(Expr, Span),
 
+    #[derivative(Debug = "transparent")]
     FnDecl(FnDecl),
+
+    #[derivative(Debug = "transparent")]
     StructDecl(StructDecl),
 
     ImplBlock {
         target: Path,
         fn_decls: Vec<FnDecl>,
+
+        #[derivative(Debug = "ignore")]
         span: Span,
     },
+
     EnumDecl {
         name: Ident,
         variants: Vec<Variant>,
+
+        #[derivative(Debug = "ignore")]
         span: Span,
     },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct ElseBranch {
     pub cond: Expr,
     pub body: Block,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct FinalBranch {
     pub body: Block,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
@@ -193,18 +231,24 @@ impl ASTNode for Stmt {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct EnumDecl {
     pub ident: Ident,
     pub variants: Vec<Variant>,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct Variant {
-    pub span: Span,
     pub ident: Ident,
     pub data: VariantData,
+
+    #[derivative(Debug = "ignore")]
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq)]
@@ -213,9 +257,12 @@ pub enum VariantData {
     Unit,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq, Clone)]
 pub struct Path {
     pub segments: Vec<Ident>,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
@@ -224,15 +271,21 @@ impl Path {
         Path { segments, span }
     }
 
+    pub fn first(&self) -> Option<&Ident> {
+        self.segments.last()
+    }
+
     pub fn len(&self) -> usize {
         self.segments.len()
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct Param {
     pub name: Ident,
     pub ty: Ty,
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
@@ -242,23 +295,33 @@ impl Param {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct StructDecl {
     pub name: Ident,
+
     pub fields: Vec<Field>,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct Field {
     pub name: Ident,
     pub ty: Ty,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq, Clone)]
 pub struct Ident {
-    pub name: String,
+    pub lexeme: String,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
@@ -281,7 +344,7 @@ impl TryFrom<Token> for Ident {
 
 impl Ident {
     pub fn new(name: String, span: Span) -> Self {
-        Ident { name, span }
+        Ident { lexeme: name, span }
     }
 }
 
@@ -291,7 +354,8 @@ impl Field {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct FnSig {
     pub name: Ident,
     pub params: Vec<Param>,
@@ -308,7 +372,8 @@ impl FnSig {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct FnDecl {
     pub head: FnSig,
     pub body: Block,
@@ -320,9 +385,12 @@ impl FnDecl {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
@@ -338,10 +406,14 @@ impl Default for ExprKind {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq, Clone)]
 pub struct Expr {
     pub node: ExprKind,
+
     pub ty: Ty,
+
+    #[derivative(Debug = "ignore")]
     pub span: Span,
 }
 
@@ -461,7 +533,7 @@ pub struct Call {
     pub args: Vec<Expr>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone)]
 pub struct Span {
     pub lo: usize,
     pub hi: usize,
@@ -476,6 +548,17 @@ impl PartialEq for Span {
     }
 }
 
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}..{}", self.lo, self.hi)
+    }
+}
+
+impl fmt::Debug for Span {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
 impl Default for Span {
     fn default() -> Self {
         Self { lo: 0, hi: 0 }
@@ -524,7 +607,7 @@ pub mod dsl {
 
     pub fn param(name: Ident, ty: Ty) -> Param {
         Param {
-            name,
+            name: name,
             ty,
             span: Span::default(),
         }
