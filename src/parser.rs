@@ -244,19 +244,11 @@ impl Parser {
     fn parse_for_loop(&mut self) -> ParseResult<Stmt> {
         let start = self.expect(TokenKind::Keyword(Keyword::For), "Fuer")?.span;
 
-        let var = self.parse_ident()?;
-        self.expect(TokenKind::ColonEq, "loop")?;
+        let vardef = self.parse_vardef()?;
 
-        let it = self.parse_expr()?; // this has to be a range expr like (20..20) or an expr with type array
         let body = self.parse_block(BlockParsingMode::Loop)?;
         let span = start.combine(&body.span);
-        Ok(Stmt::For {
-            ty: Ty::default_infer_type(it.span),
-            it,
-            var,
-            body,
-            span,
-        })
+        Ok(Stmt::For { vardef, body, span })
     }
 
     fn parse_if(&mut self, mode: BlockParsingMode) -> ParseResult<Stmt> {
@@ -343,7 +335,7 @@ impl Parser {
 
     fn parse_expr_stmt_or_vardef(&mut self) -> ParseResult<Stmt> {
         if self.next_is_vardef() {
-            self.parse_vardef()
+            self.parse_vardef_stmt()
         } else {
             self.parse_expr_stmt()
         }
@@ -363,7 +355,7 @@ impl Parser {
         false
     }
 
-    fn parse_vardef(&mut self) -> ParseResult<Stmt> {
+    fn parse_vardef(&mut self) -> ParseResult<VarDef> {
         let pat = self.parse_ident()?;
         let ty = match self.peek_kind()? {
             TokenKind::ColonEq => {
@@ -390,17 +382,22 @@ impl Parser {
 
         let init = self.parse_expr()?;
 
-        let end = self
-            .expect(TokenKind::Semi, "Semicolon vor variablen Definition")?
-            .span;
-
-        let span = pat.span.combine(&end);
-        Ok(Stmt::VarDef {
+        let span = pat.span.combine(&init.span);
+        Ok(VarDef {
             pat,
             init,
             ty,
             span,
         })
+    }
+
+    fn parse_vardef_stmt(&mut self) -> ParseResult<Stmt> {
+        let vardef = self.parse_vardef()?;
+        self.expect(
+            TokenKind::Semi,
+            "Nach einer Variablendefinition haben wir ein Semicolon erwartet!",
+        )?;
+        Ok(Stmt::VarDef(vardef))
     }
 
     fn parse_expr_stmt(&mut self) -> ParseResult<Stmt> {

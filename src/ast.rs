@@ -137,14 +137,8 @@ impl Member {
 pub enum Stmt {
     Expr(Expr),
 
-    VarDef {
-        pat: Ident, // TODO(Simon): this should really be a pattern to allow for destructoring
-        init: Expr,
-        ty: Ty,
-
-        #[derivative(Debug = "ignore")]
-        span: Span,
-    },
+    #[derivative(Debug = "transparent")]
+    VarDef(VarDef),
 
     #[derivative(Debug = "transparent")]
     Block(Block),
@@ -168,11 +162,8 @@ pub enum Stmt {
     },
 
     For {
-        var: Ident,
-        it: Expr,
-        ty: Ty, // FIXME(Simon): this is a hack to capture the value of the iter variable as a type
+        vardef: VarDef,
         body: Block,
-
         #[derivative(Debug = "ignore")]
         span: Span,
     },
@@ -204,6 +195,17 @@ pub enum Stmt {
         #[derivative(Debug = "ignore")]
         span: Span,
     },
+}
+
+#[derive(Derivative)]
+#[derivative(Debug, PartialEq)]
+pub struct VarDef {
+    pub pat: Ident, // TODO(Simon): replace with propper pattern
+    pub ty: Ty,
+    pub init: Expr,
+
+    #[derivative(Debug = "ignore")]
+    pub span: Span,
 }
 
 #[derive(Derivative)]
@@ -264,6 +266,18 @@ pub struct Path {
 
     #[derivative(Debug = "ignore")]
     pub span: Span,
+}
+
+impl fmt::Display for Path {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let p = self
+            .segments
+            .iter()
+            .map(|s| s.lexeme.clone())
+            .collect::<Vec<String>>()
+            .join("::");
+        writeln!(f, "{}", p)
+    }
 }
 
 impl Path {
