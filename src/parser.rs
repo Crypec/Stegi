@@ -598,6 +598,13 @@ impl Parser {
             }
             TokenKind::Ident(_) => {
                 let path = self.parse_path()?;
+                if path.len() == 1 {
+                    let tk: TyKind = match path.first().unwrap().clone().try_into() {
+                        Ok(t) => t,
+                        Err(_) => TyKind::Path(path),
+                    };
+                    return Ok(tk);
+                }
                 Ok(TyKind::Path(path))
             }
             TokenKind::Dollar => {
