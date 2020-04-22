@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::fmt;
 
 use crate::errors::Severity;
@@ -10,6 +11,9 @@ use derivative::*;
 use crate::ast::*;
 use crate::errors::Diagnostic;
 
+// NOTE(Simon): we might need to adjust this threshold to avoid too many false positives
+const WORD_CMP_TRESHOLD: f32 = 0.2;
+
 #[derive(Derivative)]
 #[derivative(Debug, PartialEq, Clone)]
 pub struct Ty {
@@ -19,22 +23,23 @@ pub struct Ty {
     pub span: Span,
 }
 
-enum TyCons {
+#[derive(Clone)]
+enum Constraint {
     Eq(TyKind, TyKind),
 }
 
-impl TyCons {
+impl Constraint {
     fn to_str(&self) -> String {
         match self {
-            TyCons::Eq(a, b) => format!("{} == {}", a, b),
+            Constraint::Eq(a, b) => format!("{} == {}", a, b),
         }
     }
 }
 
-impl fmt::Debug for TyCons {
+impl fmt::Debug for Constraint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TyCons::Eq(lhs, rhs) => write!(f, "{} == {}", lhs.to_str(), rhs.to_str()),
+            Constraint::Eq(lhs, rhs) => write!(f, "{} == {}", lhs.to_str(), rhs.to_str()),
         }
     }
 }
@@ -68,6 +73,18 @@ pub enum TyKind {
 impl fmt::Display for TyKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_str())
+    }
+}
+
+impl TryFrom<Ident> for TyKind {
+    type Error = ();
+    fn try_from(ident: Ident) -> Result<TyKind, Self::Error> {
+        match ident.lexeme.as_str() {
+            "Zahl" => Ok(TyKind::Num),
+            "Bool" => Ok(TyKind::Bool),
+            "Text" => Ok(TyKind::Text),
+            _ => Err(()),
+        }
     }
 }
 
@@ -118,261 +135,23 @@ impl Ty {
     }
 }
 
-// NOTE(Simon): we might need to adjust this threshold to avoid too many false positives
-const WORD_CMP_TRESHOLD: f32 = 0.2;
-
-pub struct TypeAnnotatorPass {
-    index: usize,
-    stack: Vec<HashMap<String, TyKind>>,
-    diagnostics: Vec<Diagnostic>,
-}
-
-impl TypeAnnotatorPass {
-    pub fn new() -> Self {
-        Self {
-            index: 0,
-            stack: Vec::new(),
-            diagnostics: Vec::new(),
-        }
-    }
-
-    fn new_ty_id(&mut self) -> TyKind {
-        let id = self.index;
-        self.index += 1;
-        TyKind::Infer(id)
-    }
-
-    pub fn annotate(&mut self, ast: &mut Vec<Stmt>) -> Vec<Diagnostic> {
-        ast.into_iter().for_each(|s| s.accept(self));
-        self.diagnostics.clone()
-    }
-
-    pub fn annotate_block(&mut self, block: &mut Block) {
-        self.make_cxt();
-        for stmt in &mut block.stmts {
-            stmt.accept(self);
-        }
-        self.destroy_cxt();
-    }
-
-    pub fn annotate_fn(&mut self, fn_decl: &mut FnDecl) {
-        for param in &mut fn_decl.head.params {
-            self.insert_cxt(param.name.lexeme.clone(), param.ty.kind.clone());
-        }
-        self.annotate_block(&mut fn_decl.body);
-    }
-
-    pub fn make_cxt(&mut self) {
-        let env = match self.stack.last() {
-            Some(env) => env.clone(),
-            None => HashMap::new(),
-        };
-        self.stack.push(env);
-    }
-
-    pub fn destroy_cxt(&mut self) {
-        self.stack.pop();
-    }
-
-    fn get_local(&mut self, name: &str) -> Option<TyKind> {
-        self.stack.last().unwrap().get(name).cloned()
-    }
-
-    fn insert_cxt(&mut self, name: String, tk: TyKind) {
-        self.stack.last_mut().unwrap().insert(name.to_string(), tk);
-    }
-
-    fn span_err<S: Into<String>>(&mut self, msg: S, span: Span) {
-        self.diagnostics.push(Diagnostic::new(
-            "Typenfehler",
-            &msg.into(),
-            Vec::new(),
-            Severity::Fatal,
-            span,
-        ))
-    }
-}
-
-impl Visitor for TypeAnnotatorPass {
-    type Result = ();
-
-    fn visit_expr(&mut self, e: &mut Expr) -> Self::Result {
-        match e.node {
-            ExprKind::Lit(ref l) => {
-                e.ty = Ty {
-                    kind: TyKind::from_lit(l),
-                    span: e.span,
-                }
-            }
-            ExprKind::Path(ref p) => {
-                if p.len() == 1 {
-                    let seg = p.first().unwrap();
-                    e.ty.kind = match self.get_local(&seg.lexeme) {
-                        Some(tk) => tk,
-                        None => {
-                            self.span_err(
-                                format!("Wir konnten die Variable `{}`, nicht finden!", seg.lexeme),
-                                seg.span,
-                            );
-                            return;
-                        }
-                    };
-                }
-            }
-            ExprKind::Binary {
-                ref mut lhs,
-                ref mut rhs,
-                ..
-            } => {
-                lhs.accept(self);
-                rhs.accept(self);
-            }
-            ExprKind::Logical {
-                ref mut rhs,
-                ref mut lhs,
-                ..
-            } => {
-                rhs.accept(self);
-                lhs.accept(self);
-            }
-            ExprKind::Unary { ref mut rhs, .. } => {
-                rhs.accept(self);
-            }
-            ExprKind::Struct {
-                path: _,
-                ref mut members,
-                ..
-            } => {
-                for member in members {
-                    member.init.accept(self);
-                }
-            }
-            ExprKind::Tup(ref mut elems) | ExprKind::Array(ref mut elems) => {
-                for elem in elems {
-                    elem.accept(self);
-                }
-            }
-            ExprKind::Assign {
-                ref mut target,
-                ref mut value,
-            } => {
-                target.accept(self);
-                value.accept(self);
-            }
-            ExprKind::Range(ref mut lo, ref mut hi) => {
-                lo.accept(self);
-                hi.accept(self);
-            }
-            ExprKind::Field(ref mut lhs, ref mut ident) => {
-                // TODO(Simon): do we need give the accessed field a type id?
-                lhs.accept(self);
-            }
-            ExprKind::Call {
-                ref mut callee,
-                ref mut args,
-            } => {
-                callee.accept(self);
-                for arg in args {
-                    arg.accept(self);
-                }
-            }
-            ExprKind::Index {
-                ref mut callee,
-                ref mut index,
-            } => {
-                callee.accept(self);
-                index.accept(self);
-            }
-            ExprKind::This => {}
-        }
-    }
-
-    fn visit_stmt(&mut self, s: &mut Stmt) -> Self::Result {
-        match s {
-            Stmt::FnDecl(ref mut fn_decl) => {
-                self.annotate_fn(fn_decl);
-            }
-            Stmt::Block(b) => {
-                self.annotate_block(b);
-            }
-            Stmt::VarDef(ref mut vd) => {
-                let id = self.new_ty_id();
-
-                // NOTE(Simon): if the user has not provied a type for the vardef we assign it a new type id and try to infer it
-                // NOTE(Simon): if a type is specified we assume the user has made the correct choice and leave his type in place
-                if let TyKind::Infer(_) = vd.ty.kind {
-                    vd.ty.kind = id.clone();
-                }
-                self.insert_cxt(vd.pat.lexeme.clone(), id);
-                vd.init.accept(self);
-            }
-            Stmt::Expr(ref mut e) => {
-                e.accept(self);
-            }
-            Stmt::If {
-                ref mut cond,
-                ref mut body,
-                ref mut else_branches,
-                ref mut final_branch,
-                ..
-            } => {
-                cond.accept(self);
-                self.annotate_block(body);
-                for branch in else_branches {
-                    branch.cond.accept(self);
-                    self.annotate_block(&mut branch.body);
-                }
-                if let Some(fb) = final_branch {
-                    self.annotate_block(&mut fb.body);
-                }
-            }
-            Stmt::While {
-                ref mut cond,
-                ref mut body,
-                ..
-            } => {
-                cond.accept(self);
-                self.annotate_block(body);
-            }
-            Stmt::ImplBlock {
-                target: _,
-                ref mut fn_decls,
-                ..
-            } => {
-                for fn_decl in fn_decls {
-                    self.annotate_fn(fn_decl);
-                }
-            }
-            Stmt::For {
-                ref mut vardef,
-                ref mut body,
-                ..
-            } => {
-                let id = self.new_ty_id();
-                self.insert_cxt(vardef.pat.lexeme.clone(), id.clone());
-                vardef.ty.kind = id;
-                vardef.init.accept(self);
-                self.annotate_block(body);
-            }
-            Stmt::StructDecl(_) => {}
-            Stmt::EnumDecl { .. } => {} // TODO(Simon): Provide enum for type inference
-            Stmt::Ret(ref mut expr, ..) => expr.accept(self),
-            Stmt::Break(_) | Stmt::Continue(_) => {}
-        }
-    }
-}
-
 pub struct TypeInferencePass {
-    cons: Vec<TyCons>,
-    stack: Vec<HashMap<String, TyKind>>,
+    cons: Vec<Constraint>,
+    ty_id_index: usize,
+    cxt: Vec<HashMap<String, TyKind>>,
+    subst: Vec<TyKind>,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl TypeInferencePass {
     pub fn new() -> Self {
+        let mut inital_cxt = Vec::new();
+        inital_cxt.push(HashMap::new());
         Self {
+            ty_id_index: 0,
             cons: Vec::new(),
-            stack: Vec::new(),
+            cxt: inital_cxt,
+            subst: Vec::new(),
             diagnostics: Vec::new(),
         }
     }
@@ -381,23 +160,77 @@ impl TypeInferencePass {
         for stmt in ast {
             stmt.accept(self);
         }
-        dbg!(&self.cons);
     }
 
-    pub fn make_cxt(&mut self) {
-        let env = match self.stack.last() {
+    // fn solve_constraints(&mut self) {
+    //     for con in &self.cons.clone() {
+    //         let Constraint::Eq(t1, t2) = con;
+    //         self.unify(t1, t2);
+    //     }
+    //     dbg!(&self.subst);
+    // }
+
+    // fn unify(&mut self, t1: &TyKind, t2: &TyKind) {
+    //     match (t1, t2) {
+    //         (TyKind::Infer(i), _) if !self.subst_contains(i, &TyKind::Infer(*i)) => {
+    //             dbg!(&i);
+    //             let t1 = self.subst.get(*i).unwrap().clone();
+    //             self.unify(&t1, t2);
+    //         }
+    //         (_, TyKind::Infer(i)) if !self.subst_contains(i, &TyKind::Infer(*i)) => {
+    //             let t2 = self.subst.get(*i).unwrap().clone();
+    //             self.unify(t1, &t2);
+    //         }
+    //         (TyKind::Infer(i), _) => {
+    //             if self.is_recursive(*i, t2) {
+    //                 panic!("recursive type ${} <-> {}", i, t2);
+    //             }
+    //             self.subst[*i] = t2.clone();
+    //         }
+    //         (_, TyKind::Infer(i)) => {
+    //             if self.is_recursive(*i, t2) {
+    //                 panic!("recursive type ${} <-> {}", i, t1);
+    //             }
+    //             self.subst[*i] = t1.clone();
+    //         }
+    //         (TyKind::Num, _) | (TyKind::Bool, _) | (TyKind::Text, _) => {}
+    //         _ => todo!(),
+    //     }
+    // }
+
+    // fn is_recursive(&self, i: usize, t: &TyKind) -> bool {
+    //     match t {
+    //         TyKind::Infer(id) if self.subst_contains(id, &TyKind::Infer(*id)) => {
+    //             self.is_recursive(i, self.subst.get(*id).unwrap())
+    //         }
+    //         TyKind::Infer(id) => *id == i,
+    //         TyKind::Tup(ref elems) => elems.iter().any(|e| self.is_recursive(i, &e.kind)),
+    //         TyKind::Num | TyKind::Bool | TyKind::Text => false,
+    //         _ => panic!("{:#?}", t),
+    //     }
+    // }
+
+    fn subst_contains(&self, i: &usize, ty: &TyKind) -> bool {
+        match self.subst.get(*i) {
+            Some(t) => t == ty,
+            None => false,
+        }
+    }
+
+    fn make_cxt(&mut self) {
+        let env = match self.cxt.last() {
             Some(env) => env.clone(),
             None => HashMap::new(),
         };
-        self.stack.push(env);
+        self.cxt.push(env);
     }
 
     pub fn drop_cxt(&mut self) {
-        self.stack.pop();
+        self.cxt.pop();
     }
 
-    fn get_local(&mut self, name: &str) -> Option<TyKind> {
-        self.stack.last().unwrap().get(name).cloned()
+    fn get_local(&self, name: &str) -> Option<TyKind> {
+        self.cxt.last().unwrap().get(name).cloned()
     }
 
     fn infer_block(&mut self, block: &mut Block) {
@@ -418,21 +251,28 @@ impl TypeInferencePass {
     }
 
     fn insert_cxt(&mut self, name: String, tk: TyKind) {
-        self.stack.last_mut().unwrap().insert(name.to_string(), tk);
+        self.cxt.last_mut().unwrap().insert(name.to_string(), tk);
     }
 
-    fn add_con(&mut self, con: TyCons) {
+    fn add_con(&mut self, con: Constraint) {
         self.cons.push(con);
     }
 
+    fn new_ty_id(&mut self) -> TyKind {
+        let id = self.ty_id_index;
+        self.ty_id_index += 1;
+        TyKind::Infer(id)
+    }
+
     fn span_err<S: Into<String>>(&mut self, msg: S, span: Span) {
-        self.diagnostics.push(Diagnostic::new(
+        let diag = Diagnostic::new(
             "Typenfehler",
             &msg.into(),
             Vec::new(),
             Severity::Fatal,
             span,
-        ))
+        );
+        self.diagnostics.push(diag);
     }
 }
 
@@ -451,9 +291,9 @@ impl Visitor for TypeInferencePass {
                 let lhs = &lhs.ty.kind;
                 let rhs = &rhs.ty.kind;
 
-                self.add_con(TyCons::Eq(lhs.clone(), rhs.clone()));
-                self.add_con(TyCons::Eq(lhs.clone(), TyKind::Num));
-                self.add_con(TyCons::Eq(rhs.clone(), TyKind::Num));
+                self.add_con(Constraint::Eq(lhs.clone(), rhs.clone()));
+                self.add_con(Constraint::Eq(lhs.clone(), TyKind::Num));
+                self.add_con(Constraint::Eq(rhs.clone(), TyKind::Num));
             }
             ExprKind::Logical {
                 ref mut lhs,
@@ -464,8 +304,7 @@ impl Visitor for TypeInferencePass {
                 rhs.accept(self);
                 let lhs = &lhs.ty.kind;
                 let rhs = &rhs.ty.kind;
-
-                self.add_con(TyCons::Eq(lhs.clone(), rhs.clone()));
+                self.add_con(Constraint::Eq(lhs.clone(), rhs.clone()));
             }
             ExprKind::Unary {
                 ref mut rhs,
@@ -473,26 +312,20 @@ impl Visitor for TypeInferencePass {
             } => {
                 rhs.accept(self);
                 match op {
-                    UnaryOp::Minus => self.add_con(TyCons::Eq(rhs.ty.kind.clone(), TyKind::Num)),
-                    UnaryOp::Not => self.add_con(TyCons::Eq(rhs.ty.kind.clone(), TyKind::Bool)),
+                    UnaryOp::Minus => {
+                        self.add_con(Constraint::Eq(rhs.ty.kind.clone(), TyKind::Num))
+                    }
+                    UnaryOp::Not => self.add_con(Constraint::Eq(rhs.ty.kind.clone(), TyKind::Bool)),
                 }
             }
             ExprKind::Array(ref mut elems) => {
-                // FIXME(Simon): This loop seems really horrible!!!
-                let arr_len = elems.len();
-                for i in 0..arr_len {
-                    elems[i].accept(self);
-                    // NOTE(Simon): This is O(n^2) complexity, and I am not even shure if we need all of the cross constraints in an array.
-                    // NOTE(Simon): But because array literals are typically not really large I think it is fine for now. And if it's ever a problem
-                    // NOTE(Simon): then there is this comment to remind me to implement a better solution.
-                    for j in 0..arr_len {
-                        if i == j {
-                            break;
-                        }
-                        let lhs = elems[i].ty.kind.clone();
-                        let rhs = elems[j].ty.kind.clone();
-                        self.add_con(TyCons::Eq(lhs, rhs));
-                    }
+                let elem_ty = match elems.first() {
+                    Some(t) => t.ty.kind.clone(),
+                    None => self.new_ty_id(),
+                };
+                for e in elems {
+                    e.accept(self);
+                    self.add_con(Constraint::Eq(e.ty.kind.clone(), elem_ty.clone()));
                 }
             }
             ExprKind::Tup(ref mut elems) => {
@@ -501,14 +334,28 @@ impl Visitor for TypeInferencePass {
                 }
             }
             ExprKind::Struct {
-                ref path,
+                path: _,
                 ref mut members,
             } => {
                 for m in members {
                     m.init.accept(self);
                 }
             }
-            ExprKind::Path(_) => { // TODO(Simon): implement enum inference
+            ExprKind::Path(ref p) => {
+                // TODO(Simon): implement enum inference
+                if p.len() == 1 {
+                    let name = p.first().unwrap().lexeme.clone();
+                    match self.get_local(&name) {
+                        None => {
+                            self.span_err(format!("Variable nicht gefuden: `{}`", name), p.span);
+                            let id = self.new_ty_id();
+                            self.insert_cxt(name.clone(), id.clone());
+                            e.ty.kind = id.clone();
+                            self.add_con(Constraint::Eq(id.clone(), e.ty.kind.clone()));
+                        }
+                        Some(_) => {}
+                    }
+                }
             }
             ExprKind::Index {
                 ref mut callee,
@@ -517,7 +364,7 @@ impl Visitor for TypeInferencePass {
                 callee.accept(self);
                 index.accept(self);
 
-                self.add_con(TyCons::Eq(index.ty.kind.clone(), TyKind::Num));
+                self.add_con(Constraint::Eq(index.ty.kind.clone(), TyKind::Num));
             }
             ExprKind::Assign {
                 ref mut target,
@@ -527,14 +374,14 @@ impl Visitor for TypeInferencePass {
                 value.accept(self);
                 let t = target.ty.kind.clone();
                 let v = target.ty.kind.clone();
-                self.add_con(TyCons::Eq(t, v));
+                self.add_con(Constraint::Eq(t, v));
             }
             ExprKind::Range(ref mut lo, ref mut hi) => {
                 lo.accept(self);
                 hi.accept(self);
-                self.add_con(TyCons::Eq(lo.ty.kind.clone(), TyKind::Num));
-                self.add_con(TyCons::Eq(hi.ty.kind.clone(), TyKind::Num));
-                self.add_con(TyCons::Eq(
+                self.add_con(Constraint::Eq(lo.ty.kind.clone(), TyKind::Num));
+                self.add_con(Constraint::Eq(hi.ty.kind.clone(), TyKind::Num));
+                self.add_con(Constraint::Eq(
                     e.ty.kind.clone(),
                     TyKind::Array(Box::new(Ty {
                         kind: TyKind::Num,
@@ -542,12 +389,11 @@ impl Visitor for TypeInferencePass {
                     })),
                 ));
             }
-            ExprKind::Field(ref mut callee, ref ident) => {
+            ExprKind::Field(ref mut callee, ref _ident) => {
                 callee.accept(self);
             }
             ExprKind::Lit(ref l) => {
-                let tk = TyKind::from_lit(l);
-                self.add_con(TyCons::Eq(e.ty.kind.clone(), tk));
+                e.ty.kind = TyKind::from_lit(l);
             }
             ExprKind::Call {
                 ref mut callee,
@@ -568,8 +414,13 @@ impl Visitor for TypeInferencePass {
             }
             Stmt::VarDef(ref mut vd) => {
                 vd.init.accept(self);
+
+                if let TyKind::Infer(_) = vd.ty.kind {
+                    vd.ty.kind = self.new_ty_id();
+                }
+
                 self.insert_cxt(vd.pat.lexeme.clone(), vd.ty.kind.clone());
-                self.add_con(TyCons::Eq(vd.ty.kind.clone(), vd.init.ty.kind.clone()));
+                self.add_con(Constraint::Eq(vd.ty.kind.clone(), vd.init.ty.kind.clone()));
             }
             Stmt::Ret(ref mut val, ..) => {
                 // FIXME(Simon): we should have a constrait to the return type of the function
@@ -586,11 +437,11 @@ impl Visitor for TypeInferencePass {
                 ..
             } => {
                 cond.accept(self);
-                self.add_con(TyCons::Eq(cond.ty.kind.clone(), TyKind::Bool));
+                self.add_con(Constraint::Eq(cond.ty.kind.clone(), TyKind::Bool));
                 self.infer_block(body);
                 for branch in else_branches {
                     branch.cond.accept(self);
-                    self.add_con(TyCons::Eq(branch.cond.ty.kind.clone(), TyKind::Bool));
+                    self.add_con(Constraint::Eq(branch.cond.ty.kind.clone(), TyKind::Bool));
                 }
                 if let Some(fb) = final_branch {
                     self.infer_block(&mut fb.body);
@@ -602,7 +453,7 @@ impl Visitor for TypeInferencePass {
                 ..
             } => {
                 cond.accept(self);
-                self.add_con(TyCons::Eq(cond.ty.kind.clone(), TyKind::Bool));
+                self.add_con(Constraint::Eq(cond.ty.kind.clone(), TyKind::Bool));
                 self.infer_block(body);
             }
             Stmt::For {
@@ -614,7 +465,7 @@ impl Visitor for TypeInferencePass {
                 self.insert_cxt(vardef.pat.lexeme.clone(), vardef.ty.kind.clone());
                 self.infer_block(body);
                 self.drop_cxt();
-                self.add_con(TyCons::Eq(
+                self.add_con(Constraint::Eq(
                     TyKind::Array(Box::new(Ty {
                         kind: vardef.ty.kind.clone(),
                         span: vardef.init.span,
