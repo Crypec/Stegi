@@ -43,7 +43,6 @@ impl Driver {
             .map(Result::unwrap_err)
             .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
             .for_each(|diag| println!("{}", diag));
-        TypeAnnotatorPass::new().annotate(&mut ast);
         TypeInferencePass::new().infer(&mut ast);
         dbg!(&ast);
         let had_err = self.sess.diagnostics.iter().any(|d| match d.severity {
