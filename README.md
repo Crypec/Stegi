@@ -25,3 +25,4 @@ cargo build -- release # Die '--release' Flagge ist optional, macht den Kompiler
 ```bash
 stegi start # kompiliert dein programm und laesst es gleich laufen.
 ```
+
