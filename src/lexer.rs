@@ -330,17 +330,10 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn eat_whitespace(&mut self) {
-        self.advance_while(|c|
-            if *c == '\n'  {
-                false
-            } else {
-                c.is_whitespace()
-            }
-        );
+        self.advance_while(|c| if *c == '\n' { false } else { c.is_whitespace() });
     }
 
     pub fn scan_token(&mut self) -> Option<Result<Token, SyntaxError>> {
-
         self.eat_whitespace();
 
         let start = self.cursor;
@@ -521,23 +514,31 @@ impl Iterator for Lexer<'_> {
 }
 
 pub fn infer_semis(t_stream: Vec<Token>) -> Vec<Token> {
-
     let mut open_paren = 0;
     let mut open_bracket = 0;
     let mut t_buf = Vec::new();
 
     for t in t_stream {
         match t.kind {
-            TokenKind::LParen => open_paren +=1,
-            TokenKind::RParen => open_paren -=1,
-            TokenKind::LBracket => open_bracket +=1,
-            TokenKind::RBracket => open_bracket -=1,
+            TokenKind::LParen => open_paren += 1,
+            TokenKind::RParen => open_paren -= 1,
+            TokenKind::LBracket => open_bracket += 1,
+            TokenKind::RBracket => open_bracket -= 1,
             TokenKind::Nl if open_paren == 0 && open_bracket == 0 => {
                 match t_buf.last() {
-                    Some(Token{kind: TokenKind::Semi, span: _}) |
-                    Some(Token{kind: TokenKind::LBrace, span: _}) |
-                    Some(Token{kind: TokenKind::RBrace, span: _}) |
-                    None => continue,
+                    Some(Token {
+                        kind: TokenKind::Semi,
+                        span: _,
+                    })
+                    | Some(Token {
+                        kind: TokenKind::LBrace,
+                        span: _,
+                    })
+                    | Some(Token {
+                        kind: TokenKind::RBrace,
+                        span: _,
+                    })
+                    | None => continue,
                     _ => {}
                 };
 
