@@ -22,6 +22,8 @@ pub enum TokenKind {
     PathSep,
     Sep,
 
+    Nl,
+
     // Delimiters
     LBrace,
     RBrace,
@@ -57,6 +59,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Comment => "//",
             TokenKind::Lit(l) => l.as_str(),
             TokenKind::PathSep => "::",
+            TokenKind::Nl => "Zeilenumbruch",
             TokenKind::LBrace => "{",
             TokenKind::RBrace => "}",
             TokenKind::LParen => "(",
@@ -327,15 +330,28 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn eat_whitespace(&mut self) {
-        self.advance_while(|c| c.is_whitespace());
+        self.advance_while(|c|
+            if *c == '\n'  {
+                false
+            } else {
+                c.is_whitespace()
+            }
+        );
     }
 
     pub fn scan_token(&mut self) -> Option<Result<Token, SyntaxError>> {
-        self.eat_whitespace();
-        let start = self.cursor;
 
+        self.eat_whitespace();
+
+        let start = self.cursor;
         let c = self.advance()?;
 
+        if c == '\n' {
+            self.eat_whitespace();
+            return Some(Ok(self.yield_token(start, TokenKind::Nl)));
+        }
+
+        self.eat_whitespace();
         let token_kind = match c {
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
@@ -419,9 +435,9 @@ impl<'a> Lexer<'a> {
                 }
                 // TODO(Simon): we should just return a more specific error and hinting at the use of th keyword operators
                 // NOTE(Simon): binary AND is not allowed in this language
-                _ => return Some(Err(SyntaxError::UnexpectedChar(c, self.line))),
+                _ => return Some(Err(SyntaxError::UnexpectedChar(c, start))),
             },
-            c => return Some(Err(SyntaxError::UnexpectedChar(c, self.line))),
+            c => return Some(Err(SyntaxError::UnexpectedChar(c, start))),
         };
         let token = self.yield_token(start, token_kind);
         Some(Ok(token))
@@ -502,6 +518,41 @@ impl Iterator for Lexer<'_> {
         }
         None
     }
+}
+
+pub fn infer_semis(t_stream: Vec<Token>) -> Vec<Token> {
+
+    let mut open_paren = 0;
+    let mut open_bracket = 0;
+    let mut t_buf = Vec::new();
+
+    for t in t_stream {
+        match t.kind {
+            TokenKind::LParen => open_paren +=1,
+            TokenKind::RParen => open_paren -=1,
+            TokenKind::LBracket => open_bracket +=1,
+            TokenKind::RBracket => open_bracket -=1,
+            TokenKind::Nl if open_paren == 0 && open_bracket == 0 => {
+                match t_buf.last() {
+                    Some(Token{kind: TokenKind::Semi, span: _}) |
+                    Some(Token{kind: TokenKind::LBrace, span: _}) |
+                    Some(Token{kind: TokenKind::RBrace, span: _}) |
+                    None => continue,
+                    _ => {}
+                };
+
+                t_buf.push(Token {
+                    kind: TokenKind::Semi,
+                    span: t.span,
+                });
+                continue;
+            }
+            TokenKind::Nl => continue,
+            _ => {}
+        }
+        t_buf.push(t);
+    }
+    t_buf
 }
 
 #[cfg(test)]

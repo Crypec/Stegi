@@ -33,6 +33,7 @@ impl Driver {
         let t_stream = Lexer::new(&buf)
             .collect::<Result<Vec<Token>, SyntaxError>>()
             .expect("failed to tokenize file");
+        let t_stream = infer_semis(t_stream);
         let ast = Parser::new(t_stream).collect::<Vec<Result<Stmt, Diagnostic>>>();
         println!("{:#?}", now.elapsed());
         let (ast, errors): (Vec<_>, Vec<_>) = ast.into_iter().partition(Result::is_ok);
