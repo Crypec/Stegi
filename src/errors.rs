@@ -127,10 +127,12 @@ impl UserDiagnostic {
                 .map(|(i, _)| i)
                 .collect::<Vec<usize>>(),
         );
+        /*
         assert!(
             self.span.hi <= *line_offsets.last().unwrap(),
             "`hi` marker of span is outside of file"
         );
+        */
 
         let mut it = line_offsets.into_iter().peekable();
         let mut lo = 0;

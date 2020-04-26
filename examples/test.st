@@ -1,4 +1,3 @@
 fun start() {
-	a := 20;
-	b := a;
+    a := Test {x: 20, y: 20}.y;
 }

@@ -16,9 +16,7 @@ extern crate failure;
 
 use self::session::*;
 
-const quote: &str = "Fehler im Code zu suchen ist doppelt so schwer, wie ihn zu schreiben. Wenn sie Code so raffiniert wie moeglich schreiben, sind Sie also per defintion nicht intelligent genug, um ihn zu debuggen. - Brian W. Kernighan";
-
-const stegi_ascii: &str = r#"
+const STEGI_ASCII: &str = r#"
  _________________________________________
 / Fehler im Code zu suchen ist doppelt so \
 | schwer, wie ihn zu schreiben. Wenn sie  |
@@ -45,7 +43,7 @@ const stegi_ascii: &str = r#"
 
 fn main() {
     println!("################################ Stegi ################################ ");
-    println!("{}", stegi_ascii);
+    println!("{}", STEGI_ASCII);
 
     //let mut path = std::env::current_dir().expect("failed to get working dir");
     //path.push("examples/test.st");
