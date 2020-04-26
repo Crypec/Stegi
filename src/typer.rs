@@ -61,7 +61,9 @@ pub enum TyKind {
 
     Text,
 
-    Infer(usize),
+    Infer,
+
+    Id(usize),
 
     #[derivative(Debug = "transparent")]
     Poly(Ident),
@@ -100,7 +102,8 @@ impl TyKind {
     fn to_str(&self) -> String {
         match self {
             TyKind::Array(elem) => format!("[{}]", elem.kind),
-            TyKind::Infer(id) => format!("${}", id),
+            TyKind::Id(id) => format!("${}", id),
+            TyKind::Infer => "infer".to_string(),
             TyKind::Poly(elem) => format!("${}$", elem.lexeme),
             TyKind::Num => "num".to_string(),
             TyKind::Bool => "bool".to_string(),
@@ -123,13 +126,6 @@ impl Ty {
         Ty {
             kind: TyKind::Tup(Vec::new()),
             // TODO(Simon): are these correct and do we really need these
-            span,
-        }
-    }
-
-    pub fn default_infer_type(span: Span) -> Self {
-        Self {
-            kind: TyKind::Infer(DUMMY_TYPE_ID),
             span,
         }
     }
@@ -261,7 +257,7 @@ impl TypeInferencePass {
     fn new_ty_id(&mut self) -> TyKind {
         let id = self.ty_id_index;
         self.ty_id_index += 1;
-        TyKind::Infer(id)
+        TyKind::Id(id)
     }
 
     fn span_err<S: Into<String>>(&mut self, msg: S, span: Span) {
@@ -415,7 +411,7 @@ impl Visitor for TypeInferencePass {
             Stmt::VarDef(ref mut vd) => {
                 vd.init.accept(self);
 
-                if let TyKind::Infer(_) = vd.ty.kind {
+                if vd.ty.kind == TyKind::Infer {
                     vd.ty.kind = self.new_ty_id();
                 }
 

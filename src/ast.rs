@@ -1,6 +1,6 @@
 use super::lexer::*;
 use crate::errors::*;
-use crate::typer::Ty;
+use crate::typer::*;
 use std::convert::TryFrom;
 
 use derivative::*;
@@ -442,7 +442,10 @@ impl Expr {
         Self {
             node,
             span,
-            ty: Ty::default_infer_type(span),
+            ty: Ty {
+                kind: TyKind::Infer,
+                span,
+            },
         }
     }
 
@@ -450,7 +453,10 @@ impl Expr {
         Self {
             node: ExprKind::Tup(Vec::new()),
             span,
-            ty: Ty::default_infer_type(span),
+            ty: Ty {
+                kind: TyKind::Tup(Vec::new()),
+                span,
+            },
         }
     }
 }

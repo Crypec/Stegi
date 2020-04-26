@@ -50,7 +50,10 @@ macro_rules! __bin_op_rule (
 						rhs: Box::new(rhs),
 						op,
 					},
-					ty: Ty::default_infer_type(span.clone()),
+					ty: Ty {
+						kind: TyKind::Infer,
+						span: span.clone(),
+					},
 					span,
 				};
 			}
@@ -360,8 +363,11 @@ impl Parser {
         let ty = match self.peek_kind()? {
             TokenKind::ColonEq => {
                 // user has not provided a type, we will try to infer it later during type inference
-                self.advance()?;
-                Ty::default_infer_type(pat.span)
+                let span = self.advance()?.span;
+                Ty {
+                    kind: TyKind::Infer,
+                    span,
+                }
             }
             TokenKind::Colon => {
                 // user has provided a concrete type, we will validate during type anlysis
@@ -695,7 +701,10 @@ impl Parser {
             return Ok(Expr {
                 node: ExprKind::Range(Box::new(lhs), Box::new(rhs)),
                 span,
-                ty: Ty::default_infer_type(span),
+                ty: Ty {
+                    kind: TyKind::Infer,
+                    span,
+                },
             });
         }
         Ok(lhs)
@@ -736,7 +745,10 @@ impl Parser {
                         op: op.try_into()?,
                     },
                     span,
-                    ty: Ty::default_infer_type(span),
+                    ty: Ty {
+                        kind: TyKind::Infer,
+                        span,
+                    },
                 })
             }
             _ => self.parse_call(),
@@ -771,7 +783,10 @@ impl Parser {
         let expr = Expr {
             node: ExprKind::Struct { path, members },
             span,
-            ty: Ty::default_infer_type(span),
+            ty: Ty {
+                kind: TyKind::Infer,
+                span,
+            },
         };
         Ok(expr)
     }
@@ -787,7 +802,10 @@ impl Parser {
                 let span = self.advance()?.span;
                 Ok(Expr {
                     node: ExprKind::Lit(lit),
-                    ty: Ty::default_infer_type(span),
+                    ty: Ty {
+                        kind: TyKind::Infer,
+                        span,
+                    },
                     span,
                 })
             }
@@ -813,7 +831,10 @@ impl Parser {
                 Ok(Expr {
                     node: ExprKind::Path(pat),
                     span,
-                    ty: Ty::default_infer_type(span),
+                    ty: Ty {
+                        kind: TyKind::Infer,
+                        span,
+                    },
                 })
             }
         }
@@ -834,7 +855,10 @@ impl Parser {
         Ok(Expr {
             node: ExprKind::Tup(values),
             span,
-            ty: Ty::default_infer_type(span),
+            ty: Ty {
+                kind: TyKind::Infer,
+                span,
+            },
         })
     }
 
@@ -853,7 +877,10 @@ impl Parser {
         Ok(Expr {
             node: ExprKind::Array(values),
             span: start.combine(&end),
-            ty: Ty::default_infer_type(span),
+            ty: Ty {
+                kind: TyKind::Infer,
+                span,
+            },
         })
     }
 
@@ -899,7 +926,10 @@ impl Parser {
                 callee: Box::new(callee),
                 args,
             },
-            ty: Ty::default_infer_type(span),
+            ty: Ty {
+                kind: TyKind::Infer,
+                span,
+            },
         })
     }
 
@@ -914,7 +944,10 @@ impl Parser {
                 index: Box::new(index),
             },
             span,
-            ty: Ty::default_infer_type(span),
+            ty: Ty {
+                kind: TyKind::Infer,
+                span,
+            },
         })
     }
 
