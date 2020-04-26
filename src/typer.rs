@@ -23,6 +23,16 @@ pub struct Ty {
     pub span: Span,
 }
 
+impl Ty {
+    pub fn default_unit_type(span: Span) -> Self {
+        Ty {
+            kind: TyKind::Tup(Vec::new()),
+            // TODO(Simon): are these correct and do we really need these
+            span,
+        }
+    }
+}
+
 #[derive(Clone)]
 enum Constraint {
     Eq(TyKind, TyKind),
@@ -151,28 +161,16 @@ impl Cxt {
     }
 }
 
-impl Ty {
-    pub fn default_unit_type(span: Span) -> Self {
-        Ty {
-            kind: TyKind::Tup(Vec::new()),
-            // TODO(Simon): are these correct and do we really need these
-            span,
-        }
-    }
-}
-
 pub struct TypeInferencePass {
-    cons: Vec<Constraint>,
-    ty_id_index: usize,
     cxt: Cxt,
     subst: Vec<TyKind>,
+    cons: Vec<Constraint>,
     diagnostics: Vec<Diagnostic>,
 }
 
 impl TypeInferencePass {
     pub fn new() -> Self {
         Self {
-            ty_id_index: 0,
             cons: Vec::new(),
             cxt: Cxt::new(),
             subst: Vec::new(),
@@ -194,6 +192,12 @@ impl TypeInferencePass {
         self.cxt.drop()
     }
 
+    fn new_id(&mut self) -> TyKind {
+        let i = self.subst.len();
+        self.subst.push(TyKind::Id(i));
+        TyKind::Id(i)
+    }
+
     fn infer_fn(&mut self, fn_decl: &mut FnDecl) {
         self.cxt.make();
         for p in &mut fn_decl.head.params {
@@ -205,12 +209,6 @@ impl TypeInferencePass {
 
     fn add_con(&mut self, con: Constraint) {
         self.cons.push(con);
-    }
-
-    fn new_ty_id(&mut self) -> TyKind {
-        let id = self.ty_id_index;
-        self.ty_id_index += 1;
-        TyKind::Id(id)
     }
 
     fn span_err<S: Into<String>>(&mut self, msg: S, span: Span) {
@@ -270,7 +268,7 @@ impl Visitor for TypeInferencePass {
             ExprKind::Array(ref mut elems) => {
                 let elem_ty = match elems.first() {
                     Some(t) => t.ty.kind.clone(),
-                    None => self.new_ty_id(),
+                    None => self.new_id(),
                 };
                 for e in elems {
                     e.accept(self);
@@ -297,7 +295,7 @@ impl Visitor for TypeInferencePass {
 
                     if let None = self.cxt.get(&name) {
                         self.span_err(format!("Variable nicht gefuden: `{}`", name), p.span);
-                        let id = self.new_ty_id();
+                        let id = self.new_id();
                         self.cxt.insert(&name, id.clone());
                         e.ty.kind = id.clone();
                         self.add_con(Constraint::Eq(id.clone(), e.ty.kind.clone()));
@@ -363,7 +361,7 @@ impl Visitor for TypeInferencePass {
                 vd.init.accept(self);
 
                 if vd.ty.kind == TyKind::Infer {
-                    vd.ty.kind = self.new_ty_id();
+                    vd.ty.kind = self.new_id();
                 }
 
                 self.cxt.insert(&vd.pat.lexeme, vd.ty.kind.clone());
