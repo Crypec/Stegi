@@ -193,8 +193,6 @@ impl Cxt {
     }
 
     fn get(&self, s: &str) -> Option<TyKind> {
-        dbg!(self.0.last().unwrap().get("a "));
-        dbg!(self.0.last());
         self.0.last().unwrap().get(s).cloned()
     }
 }
@@ -220,6 +218,18 @@ impl TypeInferencePass {
         for stmt in ast {
             stmt.accept(self);
         }
+        self.cons.iter().for_each(|c| println!("{:#?}", c));
+        self.diagnostics.iter().for_each(|c| println!("{:#?}", c));
+        self.solve_cons();
+        self.subst.iter().for_each(|c| println!("{:#?}", c));
+    }
+
+    fn solve_cons(&mut self) {
+        self.cons
+            .clone()
+            .iter()
+            .map(|Constraint::Eq(t1, t2)| (t1, t2))
+            .for_each(|(t1, t2)| self.unify(t1, t2));
     }
 
     fn infer_block(&mut self, block: &mut Block) {
@@ -227,8 +237,6 @@ impl TypeInferencePass {
         for stmt in &mut block.stmts {
             stmt.accept(self);
         }
-        self.cons.iter().for_each(|c| println!("{:#?}", c));
-        self.diagnostics.iter().for_each(|c| println!("{:#?}", c));
 
         self.cxt.drop()
     }
@@ -261,6 +269,54 @@ impl TypeInferencePass {
             span,
         );
         self.diagnostics.push(diag);
+    }
+
+    fn unify(&mut self, t1: &TyKind, t2: &TyKind) {
+        match (t1, t2) {
+            (TyKind::Id(i), _) if self.get_subst(i) != TyKind::Id(*i) => {
+                let t3 = self.get_subst(i);
+                self.unify(&t3, t2);
+            }
+            (_, TyKind::Id(i)) if self.get_subst(i) != TyKind::Id(*i) => {
+                let t3 = self.get_subst(i);
+                self.unify(t1, &t3);
+            }
+            (TyKind::Id(i), _) => {
+                if self.occurs_in(*i, t2) {
+                    self.span_err(
+                        format!("Unendlicher Typ: ${} => {}", i, t2),
+                        Span::default(),
+                    );
+                    return;
+                }
+                self.subst[*i] = t2.clone();
+            }
+            (_, TyKind::Id(i)) => {
+                if self.occurs_in(*i, t1) {
+                    self.span_err(
+                        format!("Unendlicher Typ: ${} => {}", i, t2),
+                        Span::default(),
+                    );
+                    return;
+                }
+                self.subst[*i] = t1.clone();
+            }
+            _ => todo!(),
+        }
+    }
+
+    fn occurs_in(&self, index: usize, t: &TyKind) -> bool {
+        match t {
+            TyKind::Id(i) if self.get_subst(i) != TyKind::Id(*i) => {
+                self.occurs_in(index, &self.get_subst(i))
+            }
+            TyKind::Id(i) => *i == index,
+            _ => false,
+        }
+    }
+
+    fn get_subst(&self, i: &usize) -> TyKind {
+        self.subst.get(*i).unwrap().clone()
     }
 }
 
@@ -331,7 +387,6 @@ impl Visitor for TypeInferencePass {
             ExprKind::Path(ref p) => {
                 // TODO(Simon): implement enum inference
                 if p.len() == 1 {
-                    dbg!(&self.cxt);
                     let name = p.first().unwrap().lexeme.clone();
                     e.ty.kind = match self.cxt.get(&name) {
                         Some(ty) => ty,

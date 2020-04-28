@@ -45,7 +45,7 @@ impl Driver {
             .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
             .for_each(|diag| println!("{}", diag));
         TypeInferencePass::new().infer(&mut ast);
-        dbg!(&ast);
+        //dbg!(&ast);
         let had_err = self.sess.diagnostics.iter().any(|d| match d.severity {
             Severity::Fatal | Severity::CodeRed => true,
             Severity::Warning => false,
