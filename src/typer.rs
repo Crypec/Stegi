@@ -24,6 +24,10 @@ pub struct Ty {
 }
 
 impl Ty {
+    pub fn infer_internal(&mut self) {
+        self.kind = self.kind.infer_internal();
+    }
+
     pub fn default_unit_type(span: Span) -> Self {
         Ty {
             kind: TyKind::Tup(Vec::new()),
@@ -101,6 +105,37 @@ impl TryFrom<Ident> for TyKind {
 }
 
 impl TyKind {
+    pub fn infer_internal(&self) -> TyKind {
+        match self {
+            TyKind::Path(ref p) if p.len() == 1 => {
+                // NOTE(Simon): We expect interal compiler types to be a single name without any namespace information!
+                // NOTE(Simon): Right now num, bool, and txt are interal types provided by the compiler
+                let seg = &p.first().unwrap().lexeme;
+                match seg.as_str() {
+                    "Zahl" => TyKind::Num,
+                    "Text" => TyKind::Text,
+                    "Bool" => TyKind::Bool,
+                    _ => self.clone(),
+                }
+            }
+            TyKind::Array(ref t) => TyKind::Array(Box::new(Ty {
+                kind: t.kind.infer_internal(),
+                span: t.span,
+            })),
+            TyKind::Tup(ref elems) => {
+                let mut new_types = Vec::new();
+                for e in elems {
+                    new_types.push(Ty {
+                        kind: e.kind.infer_internal(),
+                        span: e.span,
+                    });
+                }
+                TyKind::Tup(new_types)
+            }
+            _ => self.clone(),
+        }
+    }
+
     fn from_lit(l: &Lit) -> Self {
         match l {
             Lit::Number(_) => TyKind::Num,
@@ -131,6 +166,7 @@ impl TyKind {
     }
 }
 
+#[derive(Debug)]
 struct Cxt(Vec<HashMap<String, TyKind>>);
 
 impl Cxt {
@@ -157,6 +193,8 @@ impl Cxt {
     }
 
     fn get(&self, s: &str) -> Option<TyKind> {
+        dbg!(self.0.last().unwrap().get("a "));
+        dbg!(self.0.last());
         self.0.last().unwrap().get(s).cloned()
     }
 }
@@ -189,6 +227,9 @@ impl TypeInferencePass {
         for stmt in &mut block.stmts {
             stmt.accept(self);
         }
+        self.cons.iter().for_each(|c| println!("{:#?}", c));
+        self.diagnostics.iter().for_each(|c| println!("{:#?}", c));
+
         self.cxt.drop()
     }
 
@@ -238,7 +279,6 @@ impl Visitor for TypeInferencePass {
                 let lhs = &lhs.ty.kind;
                 let rhs = &rhs.ty.kind;
 
-                self.add_con(Constraint::Eq(lhs.clone(), rhs.clone()));
                 self.add_con(Constraint::Eq(lhs.clone(), TyKind::Num));
                 self.add_con(Constraint::Eq(rhs.clone(), TyKind::Num));
             }
@@ -249,9 +289,9 @@ impl Visitor for TypeInferencePass {
             } => {
                 lhs.accept(self);
                 rhs.accept(self);
-                let lhs = &lhs.ty.kind;
-                let rhs = &rhs.ty.kind;
-                self.add_con(Constraint::Eq(lhs.clone(), rhs.clone()));
+                let lk = &lhs.ty.kind;
+                let rk = &rhs.ty.kind;
+                self.add_con(Constraint::Eq(lk.clone(), rk.clone()));
             }
             ExprKind::Unary {
                 ref mut rhs,
@@ -291,15 +331,17 @@ impl Visitor for TypeInferencePass {
             ExprKind::Path(ref p) => {
                 // TODO(Simon): implement enum inference
                 if p.len() == 1 {
+                    dbg!(&self.cxt);
                     let name = p.first().unwrap().lexeme.clone();
-
-                    if let None = self.cxt.get(&name) {
-                        self.span_err(format!("Variable nicht gefuden: `{}`", name), p.span);
-                        let id = self.new_id();
-                        self.cxt.insert(&name, id.clone());
-                        e.ty.kind = id.clone();
-                        self.add_con(Constraint::Eq(id.clone(), e.ty.kind.clone()));
-                    }
+                    e.ty.kind = match self.cxt.get(&name) {
+                        Some(ty) => ty,
+                        None => {
+                            self.span_err(format!("Variable nicht gefuden: `{}`", name), p.span);
+                            let id = self.new_id();
+                            self.cxt.insert(&name, id.clone());
+                            id
+                        }
+                    };
                 }
             }
             ExprKind::Index {

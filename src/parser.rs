@@ -603,15 +603,8 @@ impl Parser {
                 Ok(TyKind::Tup(elems))
             }
             TokenKind::Ident(_) => {
-                let path = self.parse_path()?;
-                if path.len() == 1 {
-                    let tk: TyKind = match path.first().unwrap().clone().try_into() {
-                        Ok(t) => t,
-                        Err(_) => TyKind::Path(path),
-                    };
-                    return Ok(tk);
-                }
-                Ok(TyKind::Path(path))
+                let p = self.parse_path()?;
+                Ok(TyKind::Path(p))
             }
             TokenKind::Dollar => {
                 self.advance()?;
@@ -1061,6 +1054,8 @@ mod tests {
         let t_stream = Lexer::new(&test.to_string())
             .map(Result::unwrap)
             .collect::<Vec<_>>();
+        let t_stream = infer_semis(t_stream);
+        dbg!(&t_stream);
         Parser::new(t_stream).parse().unwrap()
     }
 
@@ -1244,9 +1239,14 @@ mod tests {
     #[test]
     fn parse_for_loop() {
         let actual = parse_stmt_setup("fuer i :=  0..10 {}");
+        let vardef = VarDef {
+            pat: ident!(i),
+            init: range(num(0), num(10)),
+            ty: infer_ty(),
+            span: span(),
+        };
         let expected = Stmt::For {
-            it: range(num(0), num(10)),
-            var: ident!(i),
+            vardef,
             body: block(Vec::new()),
             span: Span::default(),
         };
@@ -1256,12 +1256,12 @@ mod tests {
     #[test]
     fn parse_var_def() {
         let actual = parse_stmt_setup("a := 20;");
-        let expected = Stmt::VarDef {
+        let expected = Stmt::VarDef(VarDef {
             pat: ident!(a),
             init: num(20),
             ty: infer_ty(),
-            span: Span::default(),
-        };
+            span: span(),
+        });
         assert_eq!(expected, actual);
     }
 
