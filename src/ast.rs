@@ -627,7 +627,7 @@ pub mod dsl {
 
     pub fn param(name: Ident, ty: Ty) -> Param {
         Param {
-            name: name,
+            name,
             ty,
             span: Span::default(),
         }
@@ -672,7 +672,7 @@ pub mod dsl {
     // funny name to avoid conclusion with rust's builtin bool type
     pub fn bol(x: bool) -> Expr {
         Expr {
-            node: ExprKind::Lit(Lit::Bool(x), Span::default()),
+            node: ExprKind::Lit(Lit::Bool(x)),
             ty: infer_ty(),
             span: Span::default(),
         }
@@ -680,7 +680,7 @@ pub mod dsl {
 
     pub fn num(x: usize) -> Expr {
         Expr {
-            node: ExprKind::Lit(Lit::Number(x as f64), Span::default()),
+            node: ExprKind::Lit(Lit::Number(x as f64)),
             ty: infer_ty(),
             span: Span::default(),
         }
@@ -688,7 +688,7 @@ pub mod dsl {
 
     pub fn num_f(x: f64) -> Expr {
         Expr {
-            node: ExprKind::Lit(Lit::Number(x), Span::default()),
+            node: ExprKind::Lit(Lit::Number(x)),
             ty: infer_ty(),
             span: Span::default(),
         }
@@ -696,7 +696,7 @@ pub mod dsl {
 
     pub fn txt(x: &str) -> Expr {
         Expr {
-            node: ExprKind::Lit(Lit::String(x.to_string()), Span::default()),
+            node: ExprKind::Lit(Lit::String(x.to_string())),
             ty: infer_ty(),
             span: Span::default(),
         }
@@ -816,7 +816,10 @@ pub mod dsl {
     }
 
     pub fn infer_ty() -> Ty {
-        Ty::default_infer_type(Span::default())
+        Ty {
+            kind: TyKind::Infer,
+            span: Span::default(),
+        }
     }
 
     pub fn assign(target: Expr, value: Expr) -> Expr {
