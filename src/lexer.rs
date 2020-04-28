@@ -265,7 +265,6 @@ pub struct Lexer<'a> {
     iter: MultiPeek<Chars<'a>>,
     src_buf: &'a str,
     cursor: usize,
-    line: usize,
 }
 
 impl<'a> Lexer<'a> {
@@ -274,14 +273,10 @@ impl<'a> Lexer<'a> {
             iter: multipeek(data.chars()),
             src_buf: data,
             cursor: 0,
-            line: 1,
         }
     }
     fn advance(&mut self) -> Option<char> {
         let c = self.iter.next();
-        if let Some('\n') = c {
-            self.line += 1;
-        }
         self.cursor += 1;
         c
     }
@@ -329,8 +324,16 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn eat_whitespace(&mut self) {
-        self.advance_while(|c| if *c == '\n' { false } else { c.is_whitespace() });
+    fn eat_whitespace(&mut self) {
+        self.advance_while(|c| should_skip(c));
+    }
+
+    fn should_skip(c: char) -> bool {
+        if c == '\n' {
+            false
+        } else {
+            c.is_whitespace()
+        }
     }
 
     pub fn scan_token(&mut self) -> Option<Result<Token, SyntaxError>> {
@@ -339,17 +342,12 @@ impl<'a> Lexer<'a> {
         let start = self.cursor;
         let c = self.advance()?;
 
-        if c == '\n' {
-            self.eat_whitespace();
-            return Some(Ok(self.yield_token(start, TokenKind::Nl)));
-        }
-
-        self.eat_whitespace();
         let token_kind = match c {
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
             '{' => TokenKind::LBrace,
             '}' => TokenKind::RBrace,
+            '\n' => TokenKind::Nl,
             '[' => TokenKind::LBracket,
             ']' => TokenKind::RBracket,
             ',' => TokenKind::Comma,
@@ -472,7 +470,7 @@ impl<'a> Lexer<'a> {
 
             // we found a . but no numbers after it
             if self.peek_next().map(|c| !c.is_digit(10)).unwrap_or(true) {
-                return Err(SyntaxError::UnexpectedChar('.', self.line));
+                return Err(SyntaxError::UnexpectedChar('.', start));
             }
             self.advance();
             self.advance_while(|c| c.is_digit(10));
@@ -513,6 +511,14 @@ impl Iterator for Lexer<'_> {
     }
 }
 
+fn should_skip(c: &char) -> bool {
+    if *c == '\n' {
+        false
+    } else {
+        c.is_whitespace()
+    }
+}
+
 pub fn infer_semis(t_stream: Vec<Token>) -> Vec<Token> {
     let mut open_paren = 0;
     let mut open_bracket = 0;
@@ -538,6 +544,10 @@ pub fn infer_semis(t_stream: Vec<Token>) -> Vec<Token> {
                         kind: TokenKind::RBrace,
                         span: _,
                     })
+                    | Some(Token {
+                        kind: TokenKind::Comma,
+                        span: _,
+                    })
                     | None => continue,
                     _ => {}
                 };
@@ -551,13 +561,14 @@ pub fn infer_semis(t_stream: Vec<Token>) -> Vec<Token> {
             TokenKind::Nl => continue,
             _ => {}
         }
-        t_buf.push(t);
+        t_buf.push(t)
     }
     t_buf
 }
 
 #[cfg(test)]
 mod tests {
+
     use pretty_assertions::assert_eq;
 
     use super::*;
