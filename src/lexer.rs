@@ -328,14 +328,6 @@ impl<'a> Lexer<'a> {
         self.advance_while(|c| should_skip(c));
     }
 
-    fn should_skip(c: char) -> bool {
-        if c == '\n' {
-            false
-        } else {
-            c.is_whitespace()
-        }
-    }
-
     pub fn scan_token(&mut self) -> Option<Result<Token, SyntaxError>> {
         self.eat_whitespace();
 
