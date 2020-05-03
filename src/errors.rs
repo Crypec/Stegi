@@ -5,6 +5,8 @@ use crate::session::SourceMap;
 
 use colored::*;
 
+
+
 #[derive(Debug, Fail)]
 pub enum SyntaxError {
     #[fail(
