@@ -1,11 +1,13 @@
 #![warn(clippy::pendantic)]
-#![allow(dead_code)]
 use std::path::PathBuf;
 
 #[macro_use]
 mod ast;
 
+mod cxt;
 mod errors;
+mod formatter;
+mod interp;
 mod lexer;
 mod parser;
 mod session;

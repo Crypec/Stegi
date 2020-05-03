@@ -32,6 +32,12 @@ enum BlockParsingMode {
     Normal,
 }
 
+enum Directive {
+    Expr,
+    VarDef,
+    Assign,
+}
+
 macro_rules! __bin_op_rule (
 	($name:ident, $inner:ident, $conv:ty, $kind:ident, $($op_pattern:pat)|*) => (
 		fn $name(&mut self) -> ParseResult<Expr> {
@@ -210,8 +216,6 @@ impl Parser {
 
     fn parse_stmt(&mut self, mode: BlockParsingMode) -> ParseResult<Stmt> {
         match self.peek_kind()? {
-            TokenKind::Ident(_) => self.parse_expr_stmt_or_vardef(),
-            TokenKind::Keyword(Keyword::This) => self.parse_expr_stmt(),
             TokenKind::Keyword(Keyword::Struct) => self.parse_ty_decl(),
             TokenKind::Keyword(Keyword::Fun) => self.parse_fn_decl(FnParsingMode::Function),
             TokenKind::Keyword(Keyword::Impl) => self.parse_impl_block(),
@@ -222,10 +226,11 @@ impl Parser {
             TokenKind::Keyword(Keyword::Break) => self.parse_break(mode),
             TokenKind::Keyword(Keyword::If) => self.parse_if(mode),
             TokenKind::LBrace => Ok(Stmt::Block(self.parse_block(mode)?)),
-            _ => {
-                let p = self.advance()?;
-                Err(self.span_err(format!("Unerwarteter Token gefunden: `{}` gefunden! An dieser Stelle haben wir einen der folgenden Token erwartet: `selbst`, `solange`, `fuer`, `rueckgabe`, `weiter`, `stop`, `wenn`, `{{`!", p.kind).as_str(), &p.span))
-            }
+            _ => match self.peek_directive()? {
+                Directive::VarDef => Ok(self.parse_vardef_stmt()?),
+                Directive::Assign => Ok(self.parse_assign()?),
+                Directive::Expr => Ok(self.parse_expr_stmt()?),
+            },
         }
     }
 
@@ -336,26 +341,20 @@ impl Parser {
         Ok(Stmt::Ret(ret_val, start.combine(&end)))
     }
 
-    fn parse_expr_stmt_or_vardef(&mut self) -> ParseResult<Stmt> {
-        if self.next_is_vardef() {
-            self.parse_vardef_stmt()
-        } else {
-            self.parse_expr_stmt()
-        }
-    }
-
-    fn next_is_vardef(&mut self) -> bool {
-        while let Some(t) = self.iter.peek() {
-            match t.kind {
-                TokenKind::ColonEq | TokenKind::Colon => {
-                    self.iter.reset_peek();
-                    return true;
+    fn peek_directive(&mut self) -> ParseResult<Directive> {
+        let mut i = 0;
+        loop {
+            match self.look_ahead(i)? {
+                TokenKind::Colon | TokenKind::ColonEq => return Ok(Directive::VarDef),
+                TokenKind::Eq => return Ok(Directive::Assign),
+                TokenKind::Semi => return Ok(Directive::Expr),
+                TokenKind::EOF => {
+                    let sp = self.last.as_ref().unwrap().span;
+                    return Err(self.span_err("Unerwartetes Dateiende", &sp));
                 }
-                _ => continue,
-            };
+                _ => i += 1,
+            }
         }
-        self.iter.reset_peek();
-        false
     }
 
     fn parse_vardef(&mut self) -> ParseResult<VarDef> {
@@ -404,6 +403,20 @@ impl Parser {
             "Nach einer Variablendefinition haben wir ein Semicolon erwartet!",
         )?;
         Ok(Stmt::VarDef(vardef))
+    }
+
+    fn parse_assign(&mut self) -> ParseResult<Stmt> {
+        let lhs = self.parse_expr()?;
+        self.expect(TokenKind::Eq, "Gleichheitszeichen")?;
+        let rhs = self.parse_expr()?;
+        let span = lhs.span.combine(&rhs.span);
+        self.expect(TokenKind::Semi, "Semicolon")?;
+        match lhs.node {
+            ExprKind::Path(..) | ExprKind::Field(..) | ExprKind::Index { .. } | ExprKind::This => {
+                Ok(Stmt::Assign { lhs, rhs, span })
+            }
+            _ => Err(self.span_err("Invalides Zuweisungsziel", &lhs.span)),
+        }
     }
 
     fn parse_expr_stmt(&mut self) -> ParseResult<Stmt> {
@@ -686,10 +699,10 @@ impl Parser {
     }
 
     fn parse_range(&mut self) -> ParseResult<Expr> {
-        let lhs = self.parse_assign()?;
+        let lhs = self.parse_or()?;
         if self.peek_kind()? == TokenKind::Operator(Operator::Range) {
             self.advance()?;
-            let rhs = self.parse_assign()?;
+            let rhs = self.parse_or()?;
             let span = lhs.span.combine(&rhs.span);
             return Ok(Expr {
                 node: ExprKind::Range(Box::new(lhs), Box::new(rhs)),
@@ -703,28 +716,28 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_assign(&mut self) -> ParseResult<Expr> {
-        let lhs = self.parse_or()?;
-        if self.peek_kind()? == TokenKind::Eq {
-            self.advance()?;
-            let rhs = self.parse_expr()?;
-            let sp = lhs.span.clone().combine(&rhs.span);
-            match lhs.node {
-                ExprKind::Path(..)
-                | ExprKind::Field(..)
-                | ExprKind::Index { .. }
-                | ExprKind::This => {
-                    let node = ExprKind::Assign {
-                        target: Box::new(lhs),
-                        value: Box::new(rhs),
-                    };
-                    return Ok(Expr::new(node, sp));
-                }
-                _ => return Err(self.span_err("Invalides Zuweisungsziel", &lhs.span)),
-            };
-        }
-        Ok(lhs)
-    }
+    // fn parse_assign(&mut self) -> ParseResult<Expr> {
+    //     let lhs = self.parse_or()?;
+    //     if self.peek_kind()? == TokenKind::Eq {
+    //         self.advance()?;
+    //         let rhs = self.parse_expr()?;
+    //         let sp = lhs.span.clone().combine(&rhs.span);
+    //         match lhs.node {
+    //             ExprKind::Path(..)
+    //             | ExprKind::Field(..)
+    //             | ExprKind::Index { .. }
+    //             | ExprKind::This => {
+    //                 let node = ExprKind::Assign {
+    //                     target: Box::new(lhs),
+    //                     value: Box::new(rhs),
+    //                 };
+    //                 return Ok(Expr::new(node, sp));
+    //             }
+    //             _ => return Err(self.span_err("Invalides Zuweisungsziel", &lhs.span)),
+    //         };
+    //     }
+    //     Ok(lhs)
+    // }
 
     fn parse_unary(&mut self) -> ParseResult<Expr> {
         match self.peek_kind()? {
@@ -967,7 +980,7 @@ impl Parser {
     }
 
     fn look_ahead(&mut self, i: u8) -> ParseResult<TokenKind> {
-        for _ in 0..i - 1 {
+        for _ in 0..i {
             self.iter.peek();
         }
 
@@ -1055,7 +1068,6 @@ mod tests {
             .map(Result::unwrap)
             .collect::<Vec<_>>();
         let t_stream = infer_semis(t_stream);
-        dbg!(&t_stream);
         Parser::new(t_stream).parse().unwrap()
     }
 

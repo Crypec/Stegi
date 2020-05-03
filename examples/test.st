@@ -1,4 +1,4 @@
 fun start() {
-    a := 20
-    b := a
+	test := []
+	test[10] = 20;
 }

@@ -15,27 +15,27 @@ pub enum SyntaxError {
 
     #[fail(display = "Syntaxfehler: Textliteral nicht geschlosssen '{}'", _0)]
     UnterminatedString(usize),
+    // #[fail(display = "SyntaxFehler: Unerwartetes Dateiende")]
+    // UnexpectedEOF,
 
-    #[fail(display = "SyntaxFehler: Unerwartetes Dateiende")]
-    UnexpectedEOF,
+    // #[fail(
+    //     display = "SyntaxFehler: Nach {} haben wir eigentlich {} erwartet",
+    //     _0, _1
+    // )]
+    // Missing(String, &'static str),
 
-    #[fail(
-        display = "SyntaxFehler: Nach {} haben wir eigentlich {} erwartet",
-        _0, _1
-    )]
-    Missing(String, &'static str),
-
-    #[fail(
-        display = "SyntaxFehler: Du scheinst den 'Stop' Befehl ausserhalb einer Schleife benutzt zu haben"
-    )]
-    BreakOutsideLoop,
+    // #[fail(
+    //     display = "SyntaxFehler: Du scheinst den 'Stop' Befehl ausserhalb einer Schleife benutzt zu haben"
+    // )]
+    // BreakOutsideLoop,
 }
 
-pub enum TypeError {
-    InvalidType,
-    VarNameNotFound,
-}
+// pub enum TypeError {
+//     InvalidType,
+//     VarNameNotFound,
+// }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum Severity {
     Warning,
@@ -77,6 +77,7 @@ impl Diagnostic {
         diag
     }
 
+    #[allow(dead_code)]
     pub fn add_suggestion<S: Into<String>>(&mut self, sug: S) {
         self.suggestions.push(sug.into());
     }

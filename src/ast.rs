@@ -65,12 +65,6 @@ pub enum ExprKind {
     ///          ^-callee ^index
     Index { callee: Box<Expr>, index: Box<Expr> },
 
-    /// assignment expressions can be used to change the value of an already define variable
-    /// NOTE: it's type is fixed and must be equal on both sides of the expression
-    /// example: a.b    = 20
-    ///          ^-callee ^value
-    Assign { target: Box<Expr>, value: Box<Expr> },
-
     /// array literals are used to initialize arrays with values
     /// example: [1, 2, 3, 4, 5]
     ///           ^-create new array with values from 1 to including 5
@@ -139,6 +133,16 @@ pub enum Stmt {
 
     #[derivative(Debug = "transparent")]
     VarDef(VarDef),
+
+    /// An assignment stmt can be used to change the value of an already defined variable
+    /// NOTE: it's type is fixed and must be equal on both
+    /// example: a.b    = 20
+    ///          ^-callee ^value
+    Assign {
+        lhs: Expr,
+        rhs: Expr,
+        span: Span,
+    },
 
     #[derivative(Debug = "transparent")]
     Block(Block),
@@ -266,18 +270,6 @@ pub struct Path {
 
     #[derivative(Debug = "ignore")]
     pub span: Span,
-}
-
-impl fmt::Display for Path {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let p = self
-            .segments
-            .iter()
-            .map(|s| s.lexeme.clone())
-            .collect::<Vec<String>>()
-            .join("::");
-        writeln!(f, "{}", p)
-    }
 }
 
 impl Path {
@@ -561,7 +553,7 @@ pub struct Span {
 
 impl PartialEq for Span {
     // NOTE(Simon): this seems a bit sketchy to me but we are doing it for now to use partialEq while unit testing the parser.
-    // NOTE(Simon): This makes it extemly easy because we can just use assert_eq.
+    // NOTE(Simon): This makes it extremely easy because we can just use assert_eq.
     // NOTE(Simon): We might have to find a better solution or just annotate the expected ast with the right spans.
     fn eq(&self, _: &Self) -> bool {
         true
@@ -579,6 +571,7 @@ impl fmt::Debug for Span {
         write!(f, "{}", self)
     }
 }
+
 impl Default for Span {
     fn default() -> Self {
         Self { lo: 0, hi: 0 }
@@ -823,14 +816,15 @@ pub mod dsl {
     }
 
     pub fn assign(target: Expr, value: Expr) -> Expr {
-        Expr {
-            node: ExprKind::Assign {
-                target: Box::new(target),
-                value: Box::new(value),
-            },
-            ty: infer_ty(),
-            span: Span::default(),
-        }
+        todo!()
+        // Expr {
+        //     node: ExprKind::Assign {
+        //         target: Box::new(target),
+        //         value: Box::new(value),
+        //     },
+        //     ty: infer_ty(),
+        //     span: Span::default(),
+        // }
     }
 
     macro_rules! path (

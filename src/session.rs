@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -44,7 +43,7 @@ impl Driver {
             .map(Result::unwrap_err)
             .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
             .for_each(|diag| println!("{}", diag));
-        TypeInferencePass::new().infer(&mut ast);
+        TyConsGen::new().infer(&mut ast);
         //dbg!(&ast);
         let had_err = self.sess.diagnostics.iter().any(|d| match d.severity {
             Severity::Fatal | Severity::CodeRed => true,
@@ -67,19 +66,6 @@ impl SourceMap {
     pub fn new(path: PathBuf) -> Self {
         let buf = std::fs::read_to_string(&path).expect("failed to read file");
         Self { path, buf }
-    }
-
-    pub fn read_span_snippet(&self, s: &Span) -> Result<String, std::io::Error> {
-        Ok(fs::read_to_string(&self.path)?[s.lo..s.hi].to_string())
-    }
-
-    pub fn get_line_num(&self, sp: &Span) -> usize {
-        self.buf
-            .char_indices()
-            .filter(|(_, c)| *c == '\n')
-            .position(|(i, _)| i >= sp.lo)
-            .expect("failed to compute line number of err")
-            + 1
     }
 }
 
@@ -110,10 +96,6 @@ impl Session {
     //         src_map: self.clone(),
     //     }
     // }
-
-    pub fn sess_register(&mut self, diag: Diagnostic) {
-        self.diagnostics.push(diag);
-    }
 
     // pub fn span_warn<S: Into<String>>(&self, desc: S, msg: S, span: &Span) -> Diagnostic {
     //     Diagnostic {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::cxt::Cxt;
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -12,6 +12,7 @@ use crate::ast::*;
 use crate::errors::Diagnostic;
 
 // NOTE(Simon): we might need to adjust this threshold to avoid too many false positives
+#[allow(dead_code)]
 const WORD_CMP_TRESHOLD: f32 = 0.2;
 
 #[derive(Derivative)]
@@ -35,19 +36,18 @@ impl Ty {
             span,
         }
     }
+
+    pub fn is_unit(&self) -> bool {
+        match &self.kind {
+            TyKind::Tup(t) if t.is_empty() => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone)]
 enum Constraint {
     Eq(TyKind, TyKind),
-}
-
-impl Constraint {
-    fn to_str(&self) -> String {
-        match self {
-            Constraint::Eq(a, b) => format!("{} == {}", a, b),
-        }
-    }
 }
 
 impl fmt::Debug for Constraint {
@@ -58,6 +58,7 @@ impl fmt::Debug for Constraint {
     }
 }
 
+#[allow(dead_code)]
 pub const DUMMY_TYPE_ID: usize = usize::MAX;
 
 #[derive(Derivative)]
@@ -166,45 +167,14 @@ impl TyKind {
     }
 }
 
-#[derive(Debug)]
-struct Cxt(Vec<HashMap<String, TyKind>>);
-
-impl Cxt {
-    fn new() -> Self {
-        let mut v = Vec::new();
-        v.push(HashMap::new());
-        Self(v)
-    }
-
-    fn make(&mut self) {
-        let env = match self.0.last() {
-            Some(env) => env.clone(),
-            None => HashMap::new(),
-        };
-        self.0.push(env)
-    }
-
-    fn drop(&mut self) {
-        self.0.pop();
-    }
-
-    fn insert(&mut self, n: &str, t: TyKind) {
-        self.0.last_mut().unwrap().insert(n.to_string(), t);
-    }
-
-    fn get(&self, s: &str) -> Option<TyKind> {
-        self.0.last().unwrap().get(s).cloned()
-    }
-}
-
-pub struct TypeInferencePass {
-    cxt: Cxt,
+pub struct TyConsGen {
+    cxt: Cxt<String, TyKind>,
     subst: Vec<TyKind>,
     cons: Vec<Constraint>,
     diagnostics: Vec<Diagnostic>,
 }
 
-impl TypeInferencePass {
+impl TyConsGen {
     pub fn new() -> Self {
         Self {
             cons: Vec::new(),
@@ -218,9 +188,11 @@ impl TypeInferencePass {
         for stmt in ast {
             stmt.accept(self);
         }
+        println!("=============== cons: ===============");
         self.cons.iter().for_each(|c| println!("{:#?}", c));
         self.diagnostics.iter().for_each(|c| println!("{:#?}", c));
         self.solve_cons();
+        println!("\n=============== subst: ===============");
         self.subst.iter().for_each(|c| println!("{:#?}", c));
     }
 
@@ -301,7 +273,7 @@ impl TypeInferencePass {
                 }
                 self.subst[*i] = t1.clone();
             }
-            _ => todo!(),
+            _ => panic!("{:#?}", (t1, t2)),
         }
     }
 
@@ -320,7 +292,7 @@ impl TypeInferencePass {
     }
 }
 
-impl Visitor for TypeInferencePass {
+impl Visitor for TyConsGen {
     type Result = ();
 
     fn visit_expr(&mut self, e: &mut Expr) {
@@ -408,16 +380,6 @@ impl Visitor for TypeInferencePass {
 
                 self.add_con(Constraint::Eq(index.ty.kind.clone(), TyKind::Num));
             }
-            ExprKind::Assign {
-                ref mut target,
-                ref mut value,
-            } => {
-                target.accept(self);
-                value.accept(self);
-                let t = target.ty.kind.clone();
-                let v = target.ty.kind.clone();
-                self.add_con(Constraint::Eq(t, v));
-            }
             ExprKind::Range(ref mut lo, ref mut hi) => {
                 lo.accept(self);
                 hi.accept(self);
@@ -463,6 +425,14 @@ impl Visitor for TypeInferencePass {
 
                 self.cxt.insert(&vd.pat.lexeme, vd.ty.kind.clone());
                 self.add_con(Constraint::Eq(vd.ty.kind.clone(), vd.init.ty.kind.clone()));
+            }
+            Stmt::Assign {
+                ref mut lhs,
+                ref mut rhs,
+                span: _,
+            } => {
+                lhs.accept(self);
+                rhs.accept(self);
             }
             Stmt::Ret(ref mut val, ..) => {
                 // FIXME(Simon): we should have a constrait to the return type of the function

@@ -335,11 +335,11 @@ impl<'a> Lexer<'a> {
         let c = self.advance()?;
 
         let token_kind = match c {
+            '\n' => TokenKind::Nl,
             '(' => TokenKind::LParen,
             ')' => TokenKind::RParen,
             '{' => TokenKind::LBrace,
             '}' => TokenKind::RBrace,
-            '\n' => TokenKind::Nl,
             '[' => TokenKind::LBracket,
             ']' => TokenKind::RBracket,
             ',' => TokenKind::Comma,
