@@ -222,7 +222,7 @@ impl TyConsGen {
     fn infer_fn(&mut self, fn_decl: &mut FnDecl) {
         self.cxt.make();
         for p in &mut fn_decl.head.params {
-            self.cxt.insert(&p.name.lexeme, p.ty.kind.clone());
+            self.cxt.insert(p.name.lexeme.clone(), p.ty.kind.clone());
         }
         self.infer_block(&mut fn_decl.body);
         self.cxt.drop();
@@ -361,11 +361,11 @@ impl Visitor for TyConsGen {
                 if p.len() == 1 {
                     let name = p.first().unwrap().lexeme.clone();
                     e.ty.kind = match self.cxt.get(&name) {
-                        Some(ty) => ty,
+                        Some(ty) => ty.clone(),
                         None => {
                             self.span_err(format!("Variable nicht gefuden: `{}`", name), p.span);
                             let id = self.new_id();
-                            self.cxt.insert(&name, id.clone());
+                            self.cxt.insert(name, id.clone());
                             id
                         }
                     };
@@ -423,7 +423,7 @@ impl Visitor for TyConsGen {
                     vd.ty.kind = self.new_id();
                 }
 
-                self.cxt.insert(&vd.pat.lexeme, vd.ty.kind.clone());
+                self.cxt.insert(vd.pat.lexeme.clone(), vd.ty.kind.clone());
                 self.add_con(Constraint::Eq(vd.ty.kind.clone(), vd.init.ty.kind.clone()));
             }
             Stmt::Assign {
@@ -474,7 +474,7 @@ impl Visitor for TyConsGen {
                 ..
             } => {
                 self.cxt.make();
-                self.cxt.insert(&vardef.pat.lexeme, vardef.ty.kind.clone());
+                self.cxt.insert(vardef.pat.lexeme.clone(), vardef.ty.kind.clone());
                 self.infer_block(body);
                 self.cxt.drop();
                 self.add_con(Constraint::Eq(
