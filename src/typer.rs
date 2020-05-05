@@ -2,7 +2,8 @@ use crate::cxt::Cxt;
 use std::convert::TryFrom;
 use std::fmt;
 
-use crate::errors::Severity;
+use crate::errors::*;
+
 use crate::lexer::*;
 
 use derivative::*;
@@ -59,7 +60,7 @@ impl fmt::Debug for Constraint {
 }
 
 #[allow(dead_code)]
-pub const DUMMY_TYPE_ID: usize = usize::MAX;
+pub const DUMMY_TYPE_ID: usize = std::usize::MAX;
 
 #[derive(Derivative)]
 #[derivative(Debug, PartialEq, Clone)]
@@ -232,14 +233,12 @@ impl TyConsGen {
         self.cons.push(con);
     }
 
-    fn span_err<S: Into<String>>(&mut self, msg: S, span: Span) {
-        let diag = Diagnostic::new(
-            "Typenfehler",
-            &msg.into(),
-            Vec::new(),
-            Severity::Fatal,
+    fn span_err<S: Into<String>>(&mut self, kind: ErrKind, span: Span) {
+        let diag = Diagnostic {
+            kind,
+            suggestions: Vec::new(),
             span,
-        );
+        };
         self.diagnostics.push(diag);
     }
 
@@ -474,7 +473,8 @@ impl Visitor for TyConsGen {
                 ..
             } => {
                 self.cxt.make();
-                self.cxt.insert(vardef.pat.lexeme.clone(), vardef.ty.kind.clone());
+                self.cxt
+                    .insert(vardef.pat.lexeme.clone(), vardef.ty.kind.clone());
                 self.infer_block(body);
                 self.cxt.drop();
                 self.add_con(Constraint::Eq(

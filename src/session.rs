@@ -30,7 +30,7 @@ impl Driver {
         let now = Instant::now();
         let buf = &self.sess.files.first().unwrap().buf;
         let t_stream = Lexer::new(&buf)
-            .collect::<Result<Vec<Token>, SyntaxError>>()
+            .collect::<Result<Vec<Token>, Diagnostic>>()
             .expect("failed to tokenize file");
         let t_stream = infer_semis(t_stream);
         let ast = Parser::new(t_stream).collect::<Vec<Result<Stmt, Diagnostic>>>();
@@ -46,8 +46,10 @@ impl Driver {
         TyConsGen::new().infer(&mut ast);
         //dbg!(&ast);
         let had_err = self.sess.diagnostics.iter().any(|d| match d.severity {
-            Severity::Fatal | Severity::CodeRed => true,
-            Severity::Warning => false,
+            ErrKind::Runtime(_) | ErrKind::Syntax(_) | ErrKind::Type(_) | ErrKind::Internal(_) => {
+                true
+            }
+            ErrKind::Warning { .. } => false,
         });
         if had_err {
             eprintln!("Fehler beim Kompilieren gefunden. Programm wird nicht ausgefuehrt! :c\n");

@@ -1,5 +1,6 @@
 use super::lexer::*;
 use crate::errors::*;
+use crate::errors::*;
 use crate::typer::*;
 use std::convert::TryFrom;
 
@@ -338,10 +339,8 @@ impl TryFrom<Token> for Ident {
         match t.kind {
             TokenKind::Ident(name) => Ok(Ident::new(name, t.span)),
             _ => Err(Diagnostic::new(
-                "Interner Fehler",
-                format!("Invalide Umwandlung von `{:#?}` zu `Ident`", t).as_str(),
+                ErrKind::Internal(format!("Invalide Umwandlung von Token {:#?} zu Ident", t)),
                 Vec::new(),
-                Severity::CodeRed,
                 t.span,
             )),
         }
@@ -470,13 +469,14 @@ impl TryFrom<Token> for BinaryOp {
             TokenKind::Operator(Operator::Minus) => Ok(Self::Minus),
             TokenKind::Operator(Operator::Star) => Ok(Self::Multiply),
             TokenKind::Operator(Operator::Slash) => Ok(Self::Divide),
-            _ => Err(Diagnostic::new(
-                "Interner Fehler",
-                format!("Invalide Umwandlung von `{:#?} zu BinaryOp`", t).as_str(),
-                Vec::new(),
-                Severity::CodeRed,
-                t.span,
-            )),
+            _ => Err(Diagnostic {
+                kind: ErrKind::Internal(format!(
+                    "Interner Fehler: Invalide Umwandlung von {:#?} zu BinaryOp",
+                    t
+                )),
+                suggestions: Vec::new(),
+                span: t.span,
+            }),
         }
     }
 }
@@ -494,21 +494,22 @@ pub enum CmpOp {
 impl TryFrom<Token> for CmpOp {
     type Error = Diagnostic;
 
-    fn try_from(value: Token) -> Result<Self, Self::Error> {
-        match value.kind {
+    fn try_from(t: Token) -> Result<Self, Self::Error> {
+        match t.kind {
             TokenKind::Operator(Operator::EqEq) => Ok(CmpOp::EqEq),
             TokenKind::Operator(Operator::NotEq) => Ok(CmpOp::NotEq),
             TokenKind::Operator(Operator::Greater) => Ok(CmpOp::Greater),
             TokenKind::Operator(Operator::GreaterEq) => Ok(CmpOp::GreaterEq),
             TokenKind::Operator(Operator::Less) => Ok(CmpOp::Less),
             TokenKind::Operator(Operator::LessEq) => Ok(CmpOp::LessEq),
-            _ => Err(Diagnostic::new(
-                "Interner Fehler",
-                format!("Invalide Umwandlung von `{:#?}` zu CmpOp", value).as_str(),
-                Vec::new(),
-                Severity::CodeRed,
-                value.span,
-            )),
+            _ => Err(Diagnostic {
+                kind: ErrKind::Internal(format!(
+                    "Interner Fehler: Invalide Umwandlung von `{:#?}` zu CmpOp",
+                    t
+                )),
+                suggestions: Vec::new(),
+                span: t.span,
+            }),
         }
     }
 }
@@ -528,13 +529,14 @@ impl TryFrom<Token> for UnaryOp {
         match t.kind {
             TokenKind::Operator(Operator::Not) => Ok(UnaryOp::Not),
             TokenKind::Operator(Operator::Minus) => Ok(UnaryOp::Minus),
-            _ => Err(Diagnostic::new(
-                "Interner Fehler",
-                format!("Invalide Umwandlung von `{:#?}` zu UnaryOp", t).as_str(),
-                Vec::new(),
-                Severity::CodeRed,
-                t.span,
-            )),
+            _ => Err(Diagnostic {
+                kind: ErrKind::Internal(format!(
+                    "Interner Fehler: Invalide Umwandlung von {:#?} zu UnaryOp",
+                    t
+                )),
+                suggestions: Vec::new(),
+                span: t.span,
+            }),
         }
     }
 }

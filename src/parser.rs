@@ -126,9 +126,12 @@ impl Parser {
             TokenKind::LBrace => self.parse_struct_decl(),
             TokenKind::Eq => self.parse_enum_decl(),
             _ => {
-                let start = self.advance()?.span;
-                let end = self.advance()?.span;
-                Err(self.span_err("Nach dem `typ` Schluesselwort und dem Namen deines Datentypen kann entweder ein `{` fuer einen 'Strukturtypen' oder ein `=` fuer einen Aufzaehlungstypen folgen!", &start.combine(&end)))
+                let span = self.last.as_ref().unwrap().span;
+                let kind = ErrKind::Syntax(SyntaxErr::MissingToken {
+                    expected: vec![TokenKind::LBrace, TokenKind::Eq],
+                    actual: self.look_ahead(3)?,
+                });
+                return Err(self.span_err(kind, span));
             }
         }
     }
@@ -350,7 +353,7 @@ impl Parser {
                 TokenKind::Semi => return Ok(Directive::Expr),
                 TokenKind::EOF => {
                     let sp = self.last.as_ref().unwrap().span;
-                    return Err(self.span_err("Unerwartetes Dateiende", &sp));
+                    return Err(self.span_err(ErrKind::Syntax(SyntaxErr::UnexpectedEOF), sp));
                 }
                 _ => i += 1,
             }
@@ -427,11 +430,8 @@ impl Parser {
 
     fn parse_break(&mut self, mode: BlockParsingMode) -> ParseResult<Stmt> {
         if mode == BlockParsingMode::Normal {
-            let sp = self.advance()?.span;
-            return Err(self.span_err(
-                "Der`stop` Befehl ist nur im Koerper von Schleifen erlaubt",
-                &sp,
-            ));
+            let span = self.advance()?.span;
+            return Err(self.span_err(ErrKind::Syntax(SyntaxErr::BreakOutsideLoop), span));
         }
         let start = self
             .expect(TokenKind::Keyword(Keyword::Break), "Stop befehl")?
@@ -442,11 +442,9 @@ impl Parser {
 
     fn parse_continue(&mut self, mode: BlockParsingMode) -> ParseResult<Stmt> {
         if mode == BlockParsingMode::Normal {
-            let sp = self.advance()?.span;
-            return Err(self.span_err(
-                "Der`weiter` Befehl ist nur im Koerper von Schleifen erlaubt",
-                &sp,
-            ));
+            let span = self.advance()?.span;
+            // FIXME(Simon): generate correct error for continue
+            return Err(self.span_err(ErrKind::Syntax(SyntaxErr::BreakOutsideLoop), span));
         }
         let start = self
             .expect(TokenKind::Keyword(Keyword::Continue), "weiter befehl")?
@@ -1011,23 +1009,29 @@ impl Parser {
         res
     }
 
-    fn expect<S: Into<String>>(&mut self, expected: TokenKind, msg: S) -> ParseResult<Token> {
+    fn expect(&mut self, expected: TokenKind, s: &str) -> ParseResult<Token> {
         if self.peek_kind()? == expected {
             self.advance()
         } else {
-            let sp = self.last.as_ref().unwrap().span;
-            Err(self.span_err(msg, &sp))
+            let span = self.last.as_ref().unwrap().span;
+            let diag = Diagnostic {
+                kind: ErrKind::Syntax(SyntaxErr::MissingToken {
+                    expected,
+                    actual: self.peek_kind()?,
+                }),
+                suggestions: vec![s.to_string()],
+                span,
+            };
+            Err(diag)
         }
     }
 
-    fn span_err<S: Into<String>>(&self, msg: S, span: &Span) -> Diagnostic {
-        Diagnostic::new(
-            "Fehler beim Parsen".to_string(),
-            msg.into(),
-            Vec::new(),
-            Severity::Fatal,
-            *span,
-        )
+    fn span_err(&self, kind: ErrKind, span: Span) -> Diagnostic {
+        Diagnostic {
+            kind,
+            suggestions: Vec::new(),
+            span,
+        }
     }
 }
 

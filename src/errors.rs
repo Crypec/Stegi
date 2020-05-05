@@ -1,76 +1,65 @@
 use std::fmt;
 
 use crate::ast::Span;
+use crate::lexer::TokenKind;
 use crate::session::SourceMap;
 
 use colored::*;
 
-
-
-#[derive(Debug, Fail)]
-pub enum SyntaxError {
-    #[fail(
-        display = "Syntaxfehler: Unerwarteter Buchstabe '{}' in Zeile: {}",
-        _0, _1
-    )]
-    UnexpectedChar(char, usize),
-
-    #[fail(display = "Syntaxfehler: Textliteral nicht geschlosssen '{}'", _0)]
-    UnterminatedString(usize),
-    // #[fail(display = "SyntaxFehler: Unerwartetes Dateiende")]
-    // UnexpectedEOF,
-
-    // #[fail(
-    //     display = "SyntaxFehler: Nach {} haben wir eigentlich {} erwartet",
-    //     _0, _1
-    // )]
-    // Missing(String, &'static str),
-
-    // #[fail(
-    //     display = "SyntaxFehler: Du scheinst den 'Stop' Befehl ausserhalb einer Schleife benutzt zu haben"
-    // )]
-    // BreakOutsideLoop,
+#[derive(Debug, Clone)]
+pub enum ErrKind {
+    Syntax(SyntaxErr),
+    Type(TypeErr),
+    Runtime(RuntimeError),
+    Warning { desc: String, msg: String },
+    Internal(String), // CodeRed this means we fucked something up, should never happen :D
 }
 
-// pub enum TypeError {
-//     InvalidType,
-//     VarNameNotFound,
-// }
-
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub enum Severity {
-    Warning,
-    Fatal,
-    CodeRed, // Reserved for only the highest severity alarms, this means we fucked something up :D
+pub enum SyntaxErr {
+    // lexer
+    UnexpectedChar(char),
+    UnterminatedString,
+
+    // parser
+    MissingToken {
+        expected: Vec<TokenKind>,
+        actual: TokenKind,
+    },
+    UnbalancedParen,
+    BreakOutsideLoop,
+    UnexpectedEOF,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeErr {
+    VarNotFound,
+    InvalidType,
+    InfiniteType,
+    FieldNotFound,
+}
+
+#[derive(Debug, Clone)]
+pub enum RuntimeError {
+    OutOfBounds(isize),
 }
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
-    pub desc: String,
-    pub msg: String,
+    pub kind: ErrKind,
     pub suggestions: Vec<String>,
-    pub severity: Severity,
     pub span: Span,
 }
 
 impl Diagnostic {
-    pub fn new<S: Into<String>>(
-        desc: S,
-        msg: S,
-        suggestions: Vec<S>,
-        severity: Severity,
-        span: Span,
-    ) -> Self {
+    pub fn new(kind: ErrKind, suggestions: Vec<String>, span: Span) -> Self {
         Self {
-            desc: desc.into(),
-            msg: msg.into(),
+            kind,
             suggestions: suggestions
                 .into_iter()
                 .map(|s| s.into())
                 .collect::<Vec<String>>(),
             span,
-            severity,
         }
     }
     pub fn suggest<S: Into<String>>(self, sug: S) -> Self {
@@ -87,10 +76,8 @@ impl Diagnostic {
 
 pub struct UserDiagnostic {
     pub src_map: SourceMap,
-    pub desc: String,
-    pub msg: String,
+    pub kind: ErrKind,
     pub suggestions: Vec<String>,
-    pub severity: Severity,
     pub span: Span,
 }
 
@@ -99,10 +86,8 @@ impl UserDiagnostic {
         // TODO(Simon): there may be a better way to copy the data from Diagnostic into UserDiagnostic
         Self {
             src_map,
-            desc: diag.desc,
-            msg: diag.msg,
+            kind: diag.kind,
             suggestions: diag.suggestions,
-            severity: diag.severity,
             span: diag.span,
         }
     }
@@ -167,53 +152,55 @@ impl UserDiagnostic {
     }
 
     fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
-        let line_str = format!(" {} |", self.line_num());
+        todo!();
+        // let line_str = format!(" {} |", self.line_num());
 
-        let align = line_str.len();
-        let u_line = self.underline();
+        // let align = line_str.len();
+        // let u_line = self.underline();
 
-        writeln!(f, "{:>a$}", "|", a = align)?;
-        writeln!(f, "{} {}", line_str, self.span_snippet())?;
-        writeln!(
-            f,
-            "{:>a$} {:>u$}",
-            "|",
-            u_line.color(c).bold(),
-            a = align,
-            u = self.span.lo - self.line_span().lo + u_line.len()
-        )?;
-        writeln!(
-            f,
-            "{:>a$} {}: {}",
-            "|",
-            "Hilfe".bold().underline(),
-            self.msg,
-            a = align
-        )
+        // writeln!(f, "{:>a$}", "|", a = align)?;
+        // writeln!(f, "{} {}", line_str, self.span_snippet())?;
+        // writeln!(
+        //     f,
+        //     "{:>a$} {:>u$}",
+        //     "|",
+        //     u_line.color(c).bold(),
+        //     a = align,
+        //     u = self.span.lo - self.line_span().lo + u_line.len()
+        // )?;
+        // writeln!(
+        //     f,
+        //     "{:>a$} {}: {}",
+        //     "|",
+        //     "Hilfe".bold().underline(),
+        //     self.msg,
+        //     a = align
+        //)
     }
 }
 
 impl fmt::Display for UserDiagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let color = match self.severity {
-            Severity::Warning => Color::BrightYellow,
-            Severity::Fatal => Color::Red,
-            Severity::CodeRed => Color::BrightMagenta,
-        };
-        writeln!(
-            f,
-            "{} {} {}[{}]",
-            "--".bold(),
-            self.desc.color(color).bold(),
-            "------------------------------------------".bold(),
-            self.src_map.path.to_str().unwrap().blue()
-        )?;
-        writeln!(f)?;
-        self.write_code_snippet(f, color)?;
-        writeln!(f, "")?;
-        for sug in &self.suggestions {
-            writeln!(f, " • {}", sug)?;
-        }
-        write!(f, "")
+        todo!()
+        // let color = match self.kind {
+        //     ErrKind::Warning { .. } => Color::Yellow,
+        //     ErrKind::Internal(_) => Color::BrightMagenta,
+        //     _ => Color::Red,
+        // };
+        // writeln!(
+        //     f,
+        //     "{} {} {}[{}]",
+        //     "--".bold(),
+        //     self.desc.color(color).bold(),
+        //     "------------------------------------------".bold(),
+        //     self.src_map.path.to_str().unwrap().blue()
+        // )?;
+        // writeln!(f)?;
+        // self.write_code_snippet(f, color)?;
+        // writeln!(f, "")?;
+        // for sug in &self.suggestions {
+        //     writeln!(f, " • {}", sug)?;
+        // }
+        // write!(f, "")
     }
 }

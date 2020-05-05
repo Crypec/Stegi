@@ -5,8 +5,13 @@ use std::str::FromStr;
 
 use super::errors::*;
 use crate::ast::Span;
+use crate::errors::ErrKind::Syntax;
 use itertools::multipeek;
 use itertools::*;
+use std::sync::mpsc::SyncSender;
+
+type LexResult = Result<Token, Diagnostic>;
+type LexKindResult = Result<TokenKind, Diagnostic>;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum TokenKind {
@@ -328,7 +333,7 @@ impl<'a> Lexer<'a> {
         self.advance_while(|c| should_skip(c));
     }
 
-    pub fn scan_token(&mut self) -> Option<Result<Token, SyntaxError>> {
+    pub fn scan_token(&mut self) -> Option<LexResult> {
         self.eat_whitespace();
 
         let start = self.cursor;
@@ -416,21 +421,32 @@ impl<'a> Lexer<'a> {
                     self.advance()?;
                     TokenKind::Operator(Operator::And)
                 }
-                // TODO(Simon): we should just return a more specific error and hinting at the use of th keyword operators
-                // NOTE(Simon): binary AND is not allowed in this language
-                _ => return Some(Err(SyntaxError::UnexpectedChar(c, start))),
+                // TODO(Simon): we should just return a more specific error and hinting at the use of the keyword operators
+                // NOTE(Simon): bitwise binary AND is not allowed in this language
+                _ => {
+                    return Some(Err(
+                        self.span_err(ErrKind::Syntax(SyntaxErr::UnexpectedChar(c)), start)
+                    ))
+                }
             },
-            c => return Some(Err(SyntaxError::UnexpectedChar(c, start))),
+            c => {
+                return Some(Err(
+                    self.span_err(ErrKind::Syntax(SyntaxErr::UnexpectedChar(c)), start)
+                ))
+            }
         };
         let token = self.yield_token(start, token_kind);
         Some(Ok(token))
     }
 
     fn yield_token(&mut self, start: usize, kind: TokenKind) -> Token {
-        let lexeme = self.sub_string(start);
-        let len = lexeme.len();
-        let span = Span::new(start, (start + len) - 1);
+        let span = self.yield_span(start);
         Token { kind, span }
+    }
+
+    fn yield_span(&self, start: usize) -> Span {
+        let end = start + self.cursor - 1;
+        Span::new(start, end)
     }
 
     fn sub_string(&mut self, start: usize) -> String {
@@ -438,10 +454,10 @@ impl<'a> Lexer<'a> {
         self.src_buf[start..self.cursor].to_string()
     }
 
-    fn string(&mut self, start: usize) -> Result<TokenKind, SyntaxError> {
+    fn string(&mut self, start: usize) -> LexKindResult {
         self.advance_while(|&c| c != '"');
         if self.is_at_end() {
-            return Err(SyntaxError::UnterminatedString(self.cursor));
+            return Err(self.span_err(ErrKind::Syntax(SyntaxErr::UnterminatedString), start));
         }
         // consume trailing "
         self.advance();
@@ -449,7 +465,7 @@ impl<'a> Lexer<'a> {
         Ok(TokenKind::Lit(Lit::String(lit)))
     }
 
-    fn number(&mut self, start: usize) -> Result<TokenKind, SyntaxError> {
+    fn number(&mut self, start: usize) -> LexKindResult {
         self.advance_while(|&c| c.is_digit(10));
         if let Some('.') = self.peek() {
             // if we find the range token we just bail out early and tokenize it on the next iteration
@@ -462,7 +478,7 @@ impl<'a> Lexer<'a> {
 
             // we found a . but no numbers after it
             if self.peek_next().map(|c| !c.is_digit(10)).unwrap_or(true) {
-                return Err(SyntaxError::UnexpectedChar('.', start));
+                return Err(self.span_err(ErrKind::Syntax(SyntaxErr::UnexpectedChar('.')), start));
             }
             self.advance();
             self.advance_while(|c| c.is_digit(10));
@@ -488,10 +504,15 @@ impl<'a> Lexer<'a> {
     fn is_at_end(&mut self) -> bool {
         self.peek().is_none()
     }
+
+    fn span_err(&self, kind: ErrKind, start: usize) -> Diagnostic {
+        let sp = self.yield_span(start);
+        Diagnostic::new(kind, Vec::new(), sp)
+    }
 }
 
 impl Iterator for Lexer<'_> {
-    type Item = Result<Token, SyntaxError>;
+    type Item = LexResult;
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(item) = self.scan_token() {
             match item {
