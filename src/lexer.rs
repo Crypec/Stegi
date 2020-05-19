@@ -5,10 +5,8 @@ use std::str::FromStr;
 
 use super::errors::*;
 use crate::ast::Span;
-use crate::errors::ErrKind::Syntax;
 use itertools::multipeek;
 use itertools::*;
-use std::sync::mpsc::SyncSender;
 
 type LexResult = Result<Token, Diagnostic>;
 type LexKindResult = Result<TokenKind, Diagnostic>;
