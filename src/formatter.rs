@@ -36,7 +36,7 @@ impl fmt::Display for Stmt {
                 body,
                 span: _,
             } => {
-                writeln!(f, "{}", vardef);
+                writeln!(f, "{}", vardef)?;
                 writeln!(f, "{}", body)
             }
             Stmt::While {
@@ -44,7 +44,7 @@ impl fmt::Display for Stmt {
                 body,
                 span: _,
             } => {
-                writeln!(f, "wenn {} ", cond);
+                writeln!(f, "wenn {} ", cond)?;
                 writeln!(f, "{}", body)
             }
             Stmt::Ret(e, _) => writeln!(f, "{}", e),
@@ -86,6 +86,8 @@ impl fmt::Display for CmpOp {
             CmpOp::GreaterEq => write!(f, ">="),
             CmpOp::Less => write!(f, ">"),
             CmpOp::LessEq => write!(f, "<="),
+            CmpOp::And => write!(f, "und"),
+            CmpOp::Or => write!(f, "oder"),
         }
     }
 }
