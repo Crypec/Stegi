@@ -489,6 +489,9 @@ pub enum CmpOp {
     GreaterEq,
     Less,
     LessEq,
+    // TODO(Simon): refactor this into logical op node, this is not a comparison
+    And,
+    Or,
 }
 
 impl TryFrom<Token> for CmpOp {
@@ -502,6 +505,8 @@ impl TryFrom<Token> for CmpOp {
             TokenKind::Operator(Operator::GreaterEq) => Ok(CmpOp::GreaterEq),
             TokenKind::Operator(Operator::Less) => Ok(CmpOp::Less),
             TokenKind::Operator(Operator::LessEq) => Ok(CmpOp::LessEq),
+            TokenKind::Operator(Operator::And) => Ok(CmpOp::And),
+            TokenKind::Operator(Operator::Or) => Ok(CmpOp::Or),
             _ => Err(Diagnostic {
                 kind: ErrKind::Internal(format!(
                     "Interner Fehler: Invalide Umwandlung von `{:#?}` zu CmpOp",
