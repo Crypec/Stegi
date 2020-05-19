@@ -1,4 +1,6 @@
 #![warn(clippy::pendantic)]
+#![allow(unused_imports)]
+#![allow(dead_code)]
 use std::path::PathBuf;
 
 #[macro_use]
@@ -45,7 +47,7 @@ const STEGI_ASCII: &str = r#"
 
 fn main() {
     println!("################################ Stegi ################################ ");
-    println!("{}", STEGI_ASCII);
+    //println!("{}", STEGI_ASCII);
 
     //let mut path = std::env::current_dir().expect("failed to get working dir");
     //path.push("examples/test.st");
