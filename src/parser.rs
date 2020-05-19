@@ -166,7 +166,7 @@ impl Parser {
             FnParsingMode::Function => {
                 if self.peek_kind()? == TokenKind::Keyword(Keyword::This) {
                     let sp = self.advance()?.span;
-                    return Err(self.span_err("Mit dem `selbst` Parameter kannst du Werte eines Objekts aendern. Dafuer muss die Function, die jetzt 'Methode' heisst, in einem impl Block stehen. Der `selbst` Paramter muss immer der erste Parameter einer 'Methode sein. Seinen Datentyp brauchst du nicht festzulegen. Er steht durch den `impl block` fest!'", &sp));
+                    return Err(self.span_err(ErrKind::Syntax(SyntaxErr::SelfOutsideImpl), sp));
                 }
             }
         }
@@ -378,13 +378,7 @@ impl Parser {
             }
             _ => {
                 let pk = self.advance()?;
-                return Err(self.span_err(
-                    format!(
-                        "Invalides Zeichen: `{}` in Zuweisungsziel gefunden!",
-                        pk.kind
-                    ),
-                    &pk.span,
-                ));
+                return Err(self.span_err(ErrKind::Syntax(SyntaxErr::InvalidVarDefTarget), pk.span));
             }
         };
 
@@ -418,7 +412,10 @@ impl Parser {
             ExprKind::Path(..) | ExprKind::Field(..) | ExprKind::Index { .. } | ExprKind::This => {
                 Ok(Stmt::Assign { lhs, rhs, span })
             }
-            _ => Err(self.span_err("Invalides Zuweisungsziel", &lhs.span)),
+            _ => Err(self.span_err(
+                ErrKind::Syntax(SyntaxErr::InvalidAssignmentTarget),
+                lhs.span,
+            )),
         }
     }
 
@@ -477,9 +474,13 @@ impl Parser {
                 }
                 _ => {
                     let sp = self.last.as_ref().unwrap().span;
-                    return Err(
-						self.span_err("An dieser Stelle haben wir einen der folgenden Token erwartet: `fun`, `}`", &sp).suggest("Ein `Implementierungsblock` erlaubt es Funktionalitaet zu erschaffen die mit einem Datentyp verknuepft ist. In einem `Implementierungsblock` duerfen sich nur Funktionen befinden!")
-					);
+
+                    let expected = vec![TokenKind::Keyword(Keyword::Fun), TokenKind::RBrace];
+                    let err = ErrKind::Syntax(SyntaxErr::MissingToken {
+                        expected,
+                        actual: self.peek_kind()?,
+                    });
+                    return Err(self.span_err(err, sp));
                 }
             }
         }
@@ -624,10 +625,7 @@ impl Parser {
             }
             _ => {
                 let sp = self.advance()?.span;
-                Err(self.span_err(
-                    "An dieser Stelle habe ich einen Datentypkennzeichner erwartet",
-                    &sp,
-                ))
+                Err(self.span_err(ErrKind::Syntax(SyntaxErr::ExpectedTy), sp))
             }
         }
     }
@@ -818,10 +816,7 @@ impl Parser {
             TokenKind::Ident(_) => self.parse_primary_ident(),
             _ => {
                 let sp = self.advance()?.span;
-                Err(self.span_err(
-                    "An dieser Stelle haben wir eigentlich einen mathematischen Ausdruck erwartet!",
-                    &sp,
-                ))
+                Err(self.span_err(ErrKind::Syntax(SyntaxErr::ExpectedExpr), sp))
             }
         }
     }
@@ -955,15 +950,15 @@ impl Parser {
         })
     }
 
+    // TODO(Simon): provide suggestion for ident
     fn parse_ident(&mut self) -> ParseResult<Ident> {
-        if let TokenKind::Ident(_) = self.peek_kind()? {
-            self.advance()?.try_into()
-        } else {
-            let sp = self.advance()?.span;
-            Err(self.span_err(
-                "An dieser Stelle habe ich eigentlich einen `Bezeichner` erwartet",
-                &sp,
-            ))
+        match self.peek_kind()? {
+            TokenKind::Ident(_) => self.advance()?.try_into(),
+            _ => {
+                let sp = self.advance()?.span;
+                let err = ErrKind::Syntax(SyntaxErr::ExpectedTy);
+                Err(self.span_err(err, sp))
+            }
         }
     }
 
@@ -997,8 +992,8 @@ impl Parser {
                 Ok(t)
             }
             None => Err(self.span_err(
-                "Wir haben unerwartet das Ende der Datei erreicht!",
-                &self.last.as_ref().unwrap().span,
+                ErrKind::Syntax(SyntaxErr::UnexpectedEOF),
+                self.last.as_ref().unwrap().span,
             )),
         }
     }
@@ -1016,7 +1011,7 @@ impl Parser {
             let span = self.last.as_ref().unwrap().span;
             let diag = Diagnostic {
                 kind: ErrKind::Syntax(SyntaxErr::MissingToken {
-                    expected,
+                    expected: vec![expected],
                     actual: self.peek_kind()?,
                 }),
                 suggestions: vec![s.to_string()],

@@ -3,6 +3,7 @@ use std::fmt;
 use crate::ast::Span;
 use crate::lexer::TokenKind;
 use crate::session::SourceMap;
+use crate::typer::TyKind;
 
 use colored::*;
 
@@ -21,11 +22,20 @@ pub enum SyntaxErr {
     UnexpectedChar(char),
     UnterminatedString,
 
+    SelfOutsideImpl,
+
     // parser
     MissingToken {
         expected: Vec<TokenKind>,
         actual: TokenKind,
     },
+
+    ExpectedTy,
+    ExpectedExpr,
+
+    InvalidAssignmentTarget,
+    InvalidVarDefTarget,
+
     UnbalancedParen,
     BreakOutsideLoop,
     UnexpectedEOF,
@@ -33,9 +43,10 @@ pub enum SyntaxErr {
 
 #[derive(Debug, Clone)]
 pub enum TypeErr {
-    VarNotFound,
+    VarNotFound(String),
     InvalidType,
-    InfiniteType,
+    // TODO(Simon): this should really be a ty instead of just a tykind, we need the span to do proper error reporting
+    InfRec(TyKind, TyKind),
     FieldNotFound,
 }
 
@@ -74,6 +85,7 @@ impl Diagnostic {
     }
 }
 
+#[derive(Debug)]
 pub struct UserDiagnostic {
     pub src_map: SourceMap,
     pub kind: ErrKind,
@@ -151,7 +163,7 @@ impl UserDiagnostic {
             + 1
     }
 
-    fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
+    fn write_code_snippet(&self, _f: &mut fmt::Formatter, _c: Color) -> fmt::Result {
         todo!();
         // let line_str = format!(" {} |", self.line_num());
 
@@ -180,7 +192,8 @@ impl UserDiagnostic {
 }
 
 impl fmt::Display for UserDiagnostic {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        dbg!(self);
         todo!()
         // let color = match self.kind {
         //     ErrKind::Warning { .. } => Color::Yellow,

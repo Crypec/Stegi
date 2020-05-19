@@ -5,6 +5,7 @@ use crate::typer::*;
 
 use crate::ast::*;
 use crate::errors::*;
+use crate::interp::*;
 use crate::lexer::*;
 use crate::parser::*;
 
@@ -43,9 +44,12 @@ impl Driver {
             .map(Result::unwrap_err)
             .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
             .for_each(|diag| println!("{}", diag));
-        TyConsGen::new().infer(&mut ast);
+        //TyConsGen::new().infer(&mut ast);
+
+        Interp::new().interp(&mut ast);
+
         //dbg!(&ast);
-        let had_err = self.sess.diagnostics.iter().any(|d| match d.severity {
+        let had_err = self.sess.diagnostics.iter().any(|d| match d.kind {
             ErrKind::Runtime(_) | ErrKind::Syntax(_) | ErrKind::Type(_) | ErrKind::Internal(_) => {
                 true
             }

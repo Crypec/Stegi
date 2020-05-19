@@ -233,7 +233,7 @@ impl TyConsGen {
         self.cons.push(con);
     }
 
-    fn span_err<S: Into<String>>(&mut self, kind: ErrKind, span: Span) {
+    fn span_err(&mut self, kind: ErrKind, span: Span) {
         let diag = Diagnostic {
             kind,
             suggestions: Vec::new(),
@@ -255,7 +255,7 @@ impl TyConsGen {
             (TyKind::Id(i), _) => {
                 if self.occurs_in(*i, t2) {
                     self.span_err(
-                        format!("Unendlicher Typ: ${} => {}", i, t2),
+                        ErrKind::Type(TypeErr::InfRec(t1.clone(), t2.clone())),
                         Span::default(),
                     );
                     return;
@@ -265,7 +265,7 @@ impl TyConsGen {
             (_, TyKind::Id(i)) => {
                 if self.occurs_in(*i, t1) {
                     self.span_err(
-                        format!("Unendlicher Typ: ${} => {}", i, t2),
+                        ErrKind::Type(TypeErr::InfRec(t1.clone(), t2.clone())),
                         Span::default(),
                     );
                     return;
@@ -362,9 +362,12 @@ impl Visitor for TyConsGen {
                     e.ty.kind = match self.cxt.get(&name) {
                         Some(ty) => ty.clone(),
                         None => {
-                            self.span_err(format!("Variable nicht gefuden: `{}`", name), p.span);
+                            self.span_err(
+                                ErrKind::Type(TypeErr::VarNotFound(name.clone())),
+                                p.span,
+                            );
                             let id = self.new_id();
-                            self.cxt.insert(name, id.clone());
+                            self.cxt.insert(name.clone(), id.clone());
                             id
                         }
                     };
