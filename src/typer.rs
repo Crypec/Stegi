@@ -411,6 +411,7 @@ impl Visitor for TyConsGen {
                 }
             }
             ExprKind::This => {}
+            ExprKind::Val(_) => todo!(),
         }
     }
     fn visit_stmt(&mut self, s: &mut Stmt) {

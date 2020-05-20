@@ -1,7 +1,9 @@
 use super::lexer::*;
 use crate::errors::*;
 use crate::errors::*;
+use crate::interp::*;
 use crate::typer::*;
+
 use std::convert::TryFrom;
 
 use derivative::*;
@@ -100,6 +102,9 @@ pub enum ExprKind {
     /// example: selbst    .     foo
     ///          ^-instance ptr  ^-member field
     This,
+
+    /// refers to a live object or value, this basically represents an evaluated expression
+    Val(Value),
 
     /// function call e.g. foo(-42, 1, 1)
     /// example: foo    (-42,     10)
