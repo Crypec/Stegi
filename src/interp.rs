@@ -15,11 +15,31 @@ pub enum Value {
     Text(String),
     Bool(bool),
     Object(HashMap<String, Value>),
+    Tup(Vec<Value>),
     Array(Vec<Value>),
 }
 
+impl Value {
+    fn is_num(&self) -> bool {
+        match self {
+            Value::Num(_) => true,
+            _ => false,
+        }
+    }
+
+    fn truthy(&self) -> bool {
+        match self {
+			Value::Bool(b) => *b,
+			_ => panic!("Tried to check if value other than bool is truthy, this should not happen and is most definitely a bug in our typechecker!"),
+		}
+    }
+}
+
 pub struct Interp {
-    cxt: Cxt<String, Expr>,
+    // TODO(Simon): maybe we can refactor these into an "execution environment"?
+    cxt: Cxt<String, Value>,
+    ty_table: HashMap<String, TyDecl>,
+    fn_table: HashMap<String, FnDecl>,
 }
 
 //macro_rules! bin_op {
@@ -45,7 +65,41 @@ impl From<Lit> for Value {
 
 impl Interp {
     pub fn new() -> Self {
-        Self { cxt: Cxt::new() }
+        Self {
+            cxt: Cxt::new(),
+            ty_table: HashMap::new(),
+            fn_table: HashMap::new(),
+        }
+    }
+
+    fn run_block(&mut self, block: &mut Block) -> Result<Value, Diagnostic> {
+        self.cxt.make();
+        for stmt in block.stmts.iter_mut() {
+            stmt.accept(self)?;
+        }
+        self.cxt.drop();
+        Ok(Value::Num(0.0))
+    }
+
+    fn call_fn(&mut self, callee: &Expr, args: &Vec<Expr>) -> Result<Value, Diagnostic> {
+        match callee.node {
+            ExprKind::Path(ref p) => {
+                let name = p.first().unwrap().lexeme.clone();
+                let fn_decl = self.fn_table.get(&name).unwrap().clone();
+
+                debug_assert_eq!(args.len(), fn_decl.header.params.len());
+
+                self.cxt.make();
+                for (param, arg) in fn_decl.header.params.iter().zip(args.iter()) {
+                    let arg_val = self.eval(arg)?;
+                    self.cxt.insert(param.name.lexeme.clone(), arg_val);
+                }
+                self.run_block(&mut fn_decl.body.clone())?;
+                self.cxt.drop();
+                todo!();
+            }
+            _ => todo!(),
+        }
     }
 
     pub fn eval(&mut self, e: &Expr) -> Result<Value, Diagnostic> {
@@ -122,13 +176,109 @@ impl Interp {
             },
             // NOTE(Simon): this clone may be unecessary if we decide to mutate the ast on the fly
             ExprKind::Lit(ref l) => Ok(l.clone().into()),
-            _ => todo!(),
+            ExprKind::Path(ref p) => {
+                let name = &p.first().unwrap().lexeme;
+                debug_assert!(
+                    self.cxt.get(&name).is_some(),
+                    "Fehlende Variablen sollten eigentlich vom Typchecker erkannt werden!"
+                );
+                // FIXME(Simon): as always: we don't really need this clone
+                Ok(self.cxt.get(&name).unwrap().clone())
+            }
+            ExprKind::Struct {
+                path: _,
+                ref members,
+            } => {
+                let mut obj = HashMap::new();
+                for field in members.iter() {
+                    let name = field.name.lexeme.clone();
+                    let val = self.eval(&field.init.clone())?;
+                    obj.insert(name, val);
+                }
+                Ok(Value::Object(obj))
+            }
+            ExprKind::Tup(ref elems) => {
+                // TODO(Simon): refactor this to use a nice iterator
+                let mut t = Vec::new();
+                for e in elems {
+                    t.push(self.eval(&e)?);
+                }
+                Ok(Value::Tup(t))
+            }
+            ExprKind::Array(ref arr) => {
+                // TODO(Simon): refactor this to use a nice iterator
+                let mut a = Vec::new();
+                for e in arr {
+                    a.push(self.eval(&e)?);
+                }
+                Ok(Value::Array(a))
+            }
+            ExprKind::Range(ref start, ref end) => {
+                let (start, end) = match (self.eval(start)?, self.eval(end)?) {
+					(Value::Num(start), Value::Num(end)) => (start, end),
+					_ => panic!("Start und Endwert einer Reihe muessen immer den Typ Zahl haben. Es scheint als haetten wir einen Fehler im Typchecker!")
+				};
+                // FIXME(Simon): this is unsound because a f64::MAX can be bigger than i64::MAX
+                let (start, end) = (start as i64, end as i64);
+                let range = (start..end).map(|i| Value::Num(i as f64)).collect();
+                Ok(Value::Array(range))
+            }
+            ExprKind::Index {
+                ref callee,
+                ref index,
+            } => match (self.eval(callee)?, self.eval(index)?) {
+                (Value::Array(arr), Value::Num(i)) => {
+                    let i = i.trunc() as usize;
+                    match arr.get(i) {
+                        Some(v) => Ok(v.clone()),
+                        None => panic!("index out of bounds!"),
+                    }
+                }
+                _ => panic!(
+                    "Fehler im Typchecker. Index must be of type callee: array and index: num!"
+                ),
+            },
+            ExprKind::Field(ref _callee, ref _field) => {
+                todo!();
+            }
+            ExprKind::This => todo!(),
+            ExprKind::Call {
+                ref callee,
+                ref args,
+            } => self.call_fn(&callee, &args),
+            ExprKind::Val(ref v) => Ok(v.clone()),
         }
     }
 
-    pub fn interp(&mut self, ast: &mut Vec<Stmt>) {
-        for n in ast {
-            n.accept(self).unwrap();
+    fn fill_fn_table(&mut self, ast: &mut AST) {
+        for decl in ast {
+            if let Decl::Fn(f) = decl {
+                let name = f.header.name.lexeme.clone();
+                self.fn_table.insert(name, f.clone());
+            }
+        }
+    }
+
+    fn fill_ty_table(&mut self, ast: &mut AST) {
+        for decl in ast {
+            if let Decl::TyDecl(t) = decl {
+                let name = t.name().lexeme.clone();
+                self.ty_table.insert(name, t.clone());
+            }
+        }
+    }
+
+    pub fn interp(&mut self, ast: &mut AST) {
+        self.fill_fn_table(ast);
+        self.fill_ty_table(ast);
+
+        for d in ast.iter_mut() {
+            if let Decl::Fn(f) = d {
+                // TODO(Simon): we could clean this up a bit
+                if f.header.name.lexeme == "Start" {
+                    self.run_block(&mut f.body);
+                }
+            }
         }
     }
 }
@@ -136,25 +286,96 @@ impl Interp {
 impl Visitor for Interp {
     type Result = Result<Value, Diagnostic>;
 
+    fn visit_decl(&mut self, d: &mut Decl) -> Self::Result {
+        todo!();
+    }
+
     fn visit_expr(&mut self, e: &mut Expr) -> Self::Result {
-        match e.node {
-            _ => todo!(),
-        }
+        self.eval(e)
     }
 
     fn visit_stmt(&mut self, s: &mut Stmt) -> Self::Result {
         match s {
             Stmt::VarDef(ref v) => {
+                let val = self.eval(&v.init)?;
+                let name = &v.pat.lexeme;
+                self.cxt.insert(name.clone(), val);
                 println!("{:#?}", self.eval(&v.init));
-                todo!();
             }
-            Stmt::FnDecl(ref mut fd) => {
-                for stmt in fd.body.stmts.iter_mut() {
-                    stmt.accept(self)?;
+            Stmt::If {
+                ref cond,
+                ref mut body,
+                ref mut else_branches,
+                ref mut final_branch,
+                ref span,
+            } => {
+                if self.eval(cond)?.truthy() {
+                    self.run_block(body)?;
+                } else {
+                    for branch in else_branches.iter_mut() {
+                        if self.eval(&branch.cond)?.truthy() {
+                            self.run_block(&mut branch.body)?;
+                            return Ok(Value::Num(2.0));
+                        }
+                    }
+                    if let Some(fb) = final_branch {
+                        self.run_block(&mut fb.body)?;
+                    }
                 }
                 todo!();
             }
-            _ => todo!(),
-        }
+            Stmt::For {
+                ref vardef,
+                ref mut body,
+                ref span,
+            } => {
+                self.cxt.make();
+                let val = self.eval(&vardef.init)?;
+                let loop_var = vardef.pat.lexeme.clone();
+                let arr = match val {
+					Value::Array(a) => a,
+					_ => panic!("We can only iterate through arrays! If you are starring at this message trying to understand what happend, don't worry, this is most likely a bug in the typechecker!"),
+				};
+                for elem in arr {
+                    self.cxt.insert(loop_var.clone(), elem);
+                    self.run_block(body)?;
+                }
+                self.cxt.drop();
+            }
+            Stmt::Expr(ref e) => {
+                self.eval(e)?;
+            }
+            Stmt::While {
+                ref cond,
+                ref mut body,
+                ref span,
+            } => {
+                while self.eval(cond)?.truthy() {
+                    self.run_block(body)?;
+                }
+            }
+            Stmt::Assign {
+                ref lhs,
+                ref rhs,
+                ref span,
+            } => {
+                println!("bevor eval");
+                dbg!(lhs);
+                dbg!(rhs);
+                let lhs = self.eval(lhs)?;
+                let rhs = self.eval(rhs)?;
+
+                println!("after eval");
+                dbg!(lhs);
+                dbg!(rhs);
+                todo!();
+            }
+            Stmt::Block(ref mut block) => {
+                self.run_block(block)?;
+            }
+            Stmt::Break(_) | Stmt::Continue(_) => todo!(),
+            Stmt::Ret(_, _) => todo!(),
+        };
+        return Ok(Value::Text("test".to_string()));
     }
 }

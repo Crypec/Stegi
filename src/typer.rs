@@ -185,6 +185,14 @@ impl TyConsGen {
         }
     }
 
+    pub fn check_struct(&self, s: &Struct) {
+        todo!();
+    }
+
+    pub fn check_enum(&self, e: &Enum) {
+        todo!();
+    }
+
     pub fn infer(&mut self, ast: &mut Vec<Stmt>) {
         for stmt in ast {
             stmt.accept(self);
@@ -222,7 +230,7 @@ impl TyConsGen {
 
     fn infer_fn(&mut self, fn_decl: &mut FnDecl) {
         self.cxt.make();
-        for p in &mut fn_decl.head.params {
+        for p in &mut fn_decl.header.params {
             self.cxt.insert(p.name.lexeme.clone(), p.ty.kind.clone());
         }
         self.infer_block(&mut fn_decl.body);
@@ -293,6 +301,23 @@ impl TyConsGen {
 
 impl Visitor for TyConsGen {
     type Result = ();
+
+    fn visit_decl(&mut self, decl: &mut Decl) -> Self::Result {
+        match decl {
+            Decl::Fn(f) => self.infer_fn(f),
+            Decl::TyDecl(t) => match t {
+                TyDecl::Enum(e) => self.check_enum(e),
+                TyDecl::Struct(s) => self.check_struct(s),
+            },
+            Decl::Impl {
+                target: _,
+                ref mut fn_decls,
+                span: _,
+            } => {
+                fn_decls.iter_mut().for_each(|f| self.infer_fn(f));
+            }
+        };
+    }
 
     fn visit_expr(&mut self, e: &mut Expr) {
         match e.node {
@@ -441,9 +466,9 @@ impl Visitor for TyConsGen {
                 // FIXME(Simon): we should have a constrait to the return type of the function
                 val.accept(self);
             }
-            Stmt::FnDecl(ref mut fn_decl) => {
-                self.infer_fn(fn_decl);
-            }
+            // Stmt::FnDecl(ref mut fn_decl) => {
+            //     self.infer_fn(fn_decl);
+            // }
             Stmt::If {
                 ref mut cond,
                 ref mut body,
@@ -489,15 +514,8 @@ impl Visitor for TyConsGen {
                     vardef.init.ty.kind.clone(),
                 ));
             }
-            Stmt::ImplBlock {
-                ref mut fn_decls, ..
-            } => {
-                for fn_decl in fn_decls {
-                    self.infer_fn(fn_decl);
-                }
-            }
             Stmt::Expr(ref mut e) => e.accept(self),
-            Stmt::Break(_) | Stmt::Continue(_) | Stmt::StructDecl(..) | Stmt::EnumDecl { .. } => {}
+            Stmt::Break(_) | Stmt::Continue(_) => {}
         }
     }
 }

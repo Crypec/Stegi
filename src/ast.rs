@@ -9,6 +9,8 @@ use std::convert::TryFrom;
 use derivative::*;
 use std::fmt;
 
+pub type AST = Vec<Decl>;
+
 pub trait ASTNode {
     fn accept<V: Visitor>(&mut self, visitor: &mut V) -> V::Result;
 }
@@ -16,6 +18,7 @@ pub trait ASTNode {
 pub trait Visitor {
     type Result;
 
+    fn visit_decl(&mut self, decl: &mut Decl) -> Self::Result;
     fn visit_stmt(&mut self, stmt: &mut Stmt) -> Self::Result;
     fn visit_expr(&mut self, expr: &mut Expr) -> Self::Result;
 }
@@ -112,8 +115,8 @@ pub enum ExprKind {
     Call { callee: Box<Expr>, args: Vec<Expr> },
 }
 
-#[derive(Derivative)]
-#[derivative(Debug, PartialEq, Clone)]
+#[derive(Clone, PartialEq, Derivative)]
+#[derivative(Debug)]
 pub struct Member {
     pub name: Ident,
     pub init: Expr,
@@ -132,7 +135,75 @@ impl Member {
     }
 }
 
-#[derive(Derivative, PartialEq)]
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
+pub struct Struct {
+    pub name: Ident,
+
+    pub fields: Vec<Field>,
+    pub methods: Vec<FnDecl>,
+
+    #[derivative(Debug = "ignore")]
+    pub span: Span,
+}
+
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
+pub struct Enum {
+    pub name: Ident,
+    pub variants: Vec<Variant>,
+    pub methods: Vec<FnDecl>,
+
+    #[derivative(Debug = "ignore")]
+    pub span: Span,
+}
+
+#[derive(Clone, Derivative)]
+#[derivative(Debug)]
+pub enum TyDecl {
+    Struct(Struct),
+    Enum(Enum),
+}
+
+impl TyDecl {
+    pub fn name(&self) -> Ident {
+        match self {
+            TyDecl::Enum(e) => e.name.clone(),
+            TyDecl::Struct(s) => s.name.clone(),
+        }
+    }
+
+    pub fn add_methods(&mut self, mut methods: Vec<FnDecl>) {
+        match self {
+            TyDecl::Enum(e) => e.methods.append(&mut methods),
+            TyDecl::Struct(s) => s.methods.append(&mut methods),
+        }
+    }
+}
+
+#[derive(Derivative)]
+#[derivative(Debug, Clone)]
+pub struct FnDecl {
+    pub header: FnSig,
+    pub body: Block,
+    pub span: Span,
+}
+
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub enum Decl {
+    TyDecl(TyDecl),
+    Fn(FnDecl),
+    Impl {
+        target: Path,
+        fn_decls: Vec<FnDecl>,
+
+        #[derivative(Debug = "ignore")]
+        span: Span,
+    },
+}
+
+#[derive(Clone, PartialEq, Derivative)]
 #[derivative(Debug)]
 pub enum Stmt {
     Expr(Expr),
@@ -183,31 +254,9 @@ pub enum Stmt {
     Continue(Span),
 
     Ret(Expr, Span),
-
-    #[derivative(Debug = "transparent")]
-    FnDecl(FnDecl),
-
-    #[derivative(Debug = "transparent")]
-    StructDecl(StructDecl),
-
-    ImplBlock {
-        target: Path,
-        fn_decls: Vec<FnDecl>,
-
-        #[derivative(Debug = "ignore")]
-        span: Span,
-    },
-
-    EnumDecl {
-        name: Ident,
-        variants: Vec<Variant>,
-
-        #[derivative(Debug = "ignore")]
-        span: Span,
-    },
 }
 
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug, PartialEq)]
 pub struct VarDef {
     pub pat: Ident, // TODO(Simon): replace with propper pattern
@@ -218,7 +267,7 @@ pub struct VarDef {
     pub span: Span,
 }
 
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug, PartialEq)]
 pub struct ElseBranch {
     pub cond: Expr,
@@ -228,7 +277,7 @@ pub struct ElseBranch {
     pub span: Span,
 }
 
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug, PartialEq)]
 pub struct FinalBranch {
     pub body: Block,
@@ -253,7 +302,7 @@ pub struct EnumDecl {
     pub span: Span,
 }
 
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug, PartialEq)]
 pub struct Variant {
     pub ident: Ident,
@@ -263,7 +312,7 @@ pub struct Variant {
     pub span: Span,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum VariantData {
     Val(Vec<Ty>),
     Unit,
@@ -292,7 +341,7 @@ impl Path {
     }
 }
 
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug, PartialEq)]
 pub struct Param {
     pub name: Ident,
@@ -307,18 +356,13 @@ impl Param {
     }
 }
 
-#[derive(Derivative)]
-#[derivative(Debug, PartialEq)]
-pub struct StructDecl {
-    pub name: Ident,
-
-    pub fields: Vec<Field>,
-
-    #[derivative(Debug = "ignore")]
-    pub span: Span,
+impl Struct {
+    pub fn add_methods(&mut self, mut methods: Vec<FnDecl>) {
+        self.methods.append(&mut methods);
+    }
 }
 
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug, PartialEq)]
 pub struct Field {
     pub name: Ident,
@@ -364,38 +408,16 @@ impl Field {
     }
 }
 
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug, PartialEq)]
 pub struct FnSig {
     pub name: Ident,
     pub params: Vec<Param>,
     pub ret_ty: Ty,
+    pub span: Span,
 }
 
-impl FnSig {
-    pub fn new(name: Ident, params: Vec<Param>, ret_ty: Ty) -> Self {
-        FnSig {
-            name,
-            params,
-            ret_ty,
-        }
-    }
-}
-
-#[derive(Derivative)]
-#[derivative(Debug, PartialEq)]
-pub struct FnDecl {
-    pub head: FnSig,
-    pub body: Block,
-}
-
-impl FnDecl {
-    pub fn new(head: FnSig, body: Block) -> Self {
-        FnDecl { head, body }
-    }
-}
-
-#[derive(Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug, PartialEq)]
 pub struct Block {
     pub stmts: Vec<Stmt>,

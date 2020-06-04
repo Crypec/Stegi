@@ -12,25 +12,25 @@ impl fmt::Display for Stmt {
             Stmt::Break(_) => writeln!(f, "stop;"),
             Stmt::Continue(_) => writeln!(f, "weiter;"),
             Stmt::Expr(e) => writeln!(f, "{};", e),
-            Stmt::FnDecl(fn_decl) => {
-                let params = fn_decl
-                    .head
-                    .params
-                    .iter()
-                    .map(|p| format!("{}: {}", p.name, p.ty))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let ret_ty = if !fn_decl.head.ret_ty.is_unit() {
-                    format!("-> {}", fn_decl.head.ret_ty)
-                } else {
-                    String::new()
-                };
-                writeln!(
-                    f,
-                    "{} ({}) {} {}",
-                    fn_decl.head.name, params, ret_ty, fn_decl.body
-                )
-            }
+            // Stmt::FnDecl(fn_decl) => {
+            //     let params = fn_decl
+            //         .head
+            //         .params
+            //         .iter()
+            //         .map(|p| format!("{}: {}", p.name, p.ty))
+            //         .collect::<Vec<_>>()
+            //         .join(",");
+            //     let ret_ty = if !fn_decl.head.ret_ty.is_unit() {
+            //         format!("-> {}", fn_decl.head.ret_ty)
+            //     } else {
+            //         String::new()
+            //     };
+            //     writeln!(
+            //         f,
+            //         "{} ({}) {} {}",
+            //         fn_decl.head.name, params, ret_ty, fn_decl.body
+            //     )
+            // }
             Stmt::For {
                 vardef,
                 body,
@@ -61,7 +61,7 @@ impl fmt::Display for Expr {
             ExprKind::Logical { lhs, rhs, op } => write!(f, "{} {} {}", lhs, op, rhs),
             ExprKind::Unary { op, rhs } => write!(f, "{}{}", op, rhs),
             ExprKind::Lit(l) => write!(f, "{}", l),
-            _ => todo!(),
+            e => write!(f, "{:#?}", e),
         }
     }
 }

@@ -117,14 +117,37 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> ParseResult<Stmt> {
-        self.parse_stmt(BlockParsingMode::Normal)
+    pub fn parse(&mut self) -> ParseResult<Decl> {
+        self.parse_decl()
     }
 
-    fn parse_ty_decl(&mut self) -> ParseResult<Stmt> {
+    pub fn parse_decl(&mut self) -> ParseResult<Decl> {
+        match self.peek_kind()? {
+            TokenKind::Keyword(Keyword::Fun) => {
+                Ok(Decl::Fn(self.parse_fn(FnParsingMode::Function)?))
+            }
+            TokenKind::Keyword(Keyword::Impl) => self.parse_impl(),
+            TokenKind::Keyword(Keyword::Struct) => Ok(Decl::TyDecl(self.parse_ty()?)),
+            _ => {
+                let expected = vec![
+                    TokenKind::Keyword(Keyword::Fun),
+                    TokenKind::Keyword(Keyword::Struct),
+                    TokenKind::Keyword(Keyword::Impl),
+                ];
+                let t = self.advance()?;
+                let kind = ErrKind::Syntax(SyntaxErr::MissingToken {
+                    expected,
+                    actual: t.kind,
+                });
+                Err(self.span_err(kind, t.span))
+            }
+        }
+    }
+
+    fn parse_ty(&mut self) -> ParseResult<TyDecl> {
         match self.look_ahead(3)? {
-            TokenKind::LBrace => self.parse_struct_decl(),
-            TokenKind::Eq => self.parse_enum_decl(),
+            TokenKind::LBrace => Ok(TyDecl::Struct(self.parse_struct()?)),
+            TokenKind::Eq => Ok(TyDecl::Enum(self.parse_enum()?)),
             _ => {
                 let span = self.last.as_ref().unwrap().span;
                 let kind = ErrKind::Syntax(SyntaxErr::MissingToken {
@@ -137,10 +160,12 @@ impl Parser {
     }
 
     fn parse_fn_header(&mut self, parse_mode: FnParsingMode) -> ParseResult<FnSig> {
-        self.expect(
-            TokenKind::Keyword(Keyword::Fun),
-            "An dieser Stelle haben wir das `funktion` Schluesselwort erwartet!",
-        )?;
+        let start = self
+            .expect(
+                TokenKind::Keyword(Keyword::Fun),
+                "An dieser Stelle haben wir das `funktion` Schluesselwort erwartet!",
+            )?
+            .span;
 
         let name = self.parse_ident()?;
         self.expect(TokenKind::LParen, "Funktionsnamen")?;
@@ -195,13 +220,20 @@ impl Parser {
                 Ty::default_unit_type(sp)
             }
         };
-        Ok(FnSig::new(name, params, ret_ty))
+        let span = ret_ty.span.combine(&start);
+        Ok(FnSig {
+            name,
+            params,
+            ret_ty,
+            span,
+        })
     }
 
-    fn parse_fn_decl(&mut self, parse_mode: FnParsingMode) -> ParseResult<Stmt> {
-        let fn_head = self.parse_fn_header(parse_mode)?;
+    fn parse_fn(&mut self, parse_mode: FnParsingMode) -> ParseResult<FnDecl> {
+        let header = self.parse_fn_header(parse_mode)?;
         let body = self.parse_block(BlockParsingMode::Normal)?;
-        Ok(Stmt::FnDecl(FnDecl::new(fn_head, body)))
+        let span = header.span.combine(&body.span);
+        Ok(FnDecl { header, body, span })
     }
 
     fn parse_block(&mut self, mode: BlockParsingMode) -> ParseResult<Block> {
@@ -219,9 +251,6 @@ impl Parser {
 
     fn parse_stmt(&mut self, mode: BlockParsingMode) -> ParseResult<Stmt> {
         match self.peek_kind()? {
-            TokenKind::Keyword(Keyword::Struct) => self.parse_ty_decl(),
-            TokenKind::Keyword(Keyword::Fun) => self.parse_fn_decl(FnParsingMode::Function),
-            TokenKind::Keyword(Keyword::Impl) => self.parse_impl_block(),
             TokenKind::Keyword(Keyword::While) => self.parse_while_loop(),
             TokenKind::Keyword(Keyword::For) => self.parse_for_loop(),
             TokenKind::Keyword(Keyword::Return) => self.parse_return(),
@@ -270,16 +299,15 @@ impl Parser {
             TokenKind::Keyword(Keyword::Then),
             "Einem `wenn` muss auch ein `dann` folgen :D",
         )?;
+
         let body = self.parse_block(mode)?;
-
         let mut else_branches = Vec::new();
-
         loop {
             match (self.peek_kind()?, self.look_ahead(2)?) {
                 (TokenKind::Keyword(Keyword::Else), TokenKind::Keyword(Keyword::If)) => {
-                    else_branches.push(self.parse_else_branch(mode)?);
+                    else_branches.push(self.parse_else_branch(mode)?)
                 }
-                (..) => break,
+                _ => break,
             }
         }
 
@@ -314,7 +342,7 @@ impl Parser {
 
     fn parse_else_branch(&mut self, mode: BlockParsingMode) -> ParseResult<ElseBranch> {
         let start = self.expect(TokenKind::Keyword(Keyword::Else), "An dieser Stelle haben wir das `sonst` Schluesselwort erwartet! Es erlaubt dir nach neben einem `wenn` Befehl noch weitere Bedingung zu beachten.")?.span;
-        self.expect(TokenKind::Keyword(Keyword::If), "An dieser Stelle haben wir das `sonst` Schluesselwort erwartet! Es erlaubt dir feinere Entscheidungen nach einem `sonst` Befehl zu treffen")?;
+        self.expect(TokenKind::Keyword(Keyword::If), "An dieser Stelle haben wir das `wenn` Schluesselwort erwartet! Es erlaubt dir feinere Entscheidungen nach einem `sonst` Befehl zu treffen")?;
 
         let cond = self.parse_expr()?;
 
@@ -345,7 +373,7 @@ impl Parser {
     }
 
     fn peek_directive(&mut self) -> ParseResult<Directive> {
-        let mut i = 0;
+        let mut i = 1;
         loop {
             match self.look_ahead(i)? {
                 TokenKind::Colon | TokenKind::ColonEq => return Ok(Directive::VarDef),
@@ -450,7 +478,7 @@ impl Parser {
         Ok(Stmt::Continue(start.combine(&end)))
     }
 
-    fn parse_impl_block(&mut self) -> ParseResult<Stmt> {
+    fn parse_impl(&mut self) -> ParseResult<Decl> {
         let start = self
             .expect(
                 TokenKind::Keyword(Keyword::Impl),
@@ -470,7 +498,7 @@ impl Parser {
                 TokenKind::RBrace => break,
                 TokenKind::Keyword(Keyword::Fun) => {
                     let mode = FnParsingMode::Method(impl_target.clone());
-                    fn_decls.push(self.parse_fn_decl(mode)?);
+                    fn_decls.push(self.parse_fn(mode)?);
                 }
                 _ => {
                     let sp = self.last.as_ref().unwrap().span;
@@ -490,25 +518,18 @@ impl Parser {
                 "An dieser Stelle haben wir eine schliessende Klammer: `}` erwartet",
             )?
             .span;
-        let fn_decls = fn_decls
-            .into_iter()
-            .map(|s| match s {
-                Stmt::FnDecl(f) => f,
-                _ => unreachable!(),
-            })
-            .collect();
-        Ok(Stmt::ImplBlock {
+        Ok(Decl::Impl {
             target: impl_target,
             fn_decls,
             span: start.combine(&end),
         })
     }
 
-    fn parse_struct_decl(&mut self) -> ParseResult<Stmt> {
+    fn parse_struct(&mut self) -> ParseResult<Struct> {
         let start = self
             .expect(TokenKind::Keyword(Keyword::Struct), "TypenDeclaration")?
             .span;
-        let struct_name = self.parse_ident()?;
+        let name = self.parse_ident()?;
 
         let mut fields = Vec::new();
 
@@ -528,14 +549,15 @@ impl Parser {
             };
         }
         let end = self.expect(TokenKind::RBrace, "TypenDeclaration")?.span;
-        Ok(Stmt::StructDecl(StructDecl {
-            name: struct_name,
+        Ok(Struct {
+            name,
             fields,
+            methods: Vec::new(),
             span: start.combine(&end),
-        }))
+        })
     }
 
-    fn parse_enum_decl(&mut self) -> ParseResult<Stmt> {
+    fn parse_enum(&mut self) -> ParseResult<Enum> {
         let start = self
             .expect(
                 TokenKind::Keyword(Keyword::Struct),
@@ -559,9 +581,10 @@ impl Parser {
             Some(v) => v.span,
             None => name.span,
         };
-        Ok(Stmt::EnumDecl {
+        Ok(Enum {
             name,
             variants,
+            methods: Vec::new(),
             span: start.combine(&end),
         })
     }
@@ -973,10 +996,10 @@ impl Parser {
     }
 
     fn look_ahead(&mut self, i: u8) -> ParseResult<TokenKind> {
-        for _ in 0..i {
+        debug_assert!(i > 0, "Can't peek into the void!");
+        for _ in 0..i - 1 {
             self.iter.peek();
         }
-
         let item = match self.iter.peek() {
             Some(t) => Ok(t.kind.clone()),
             None => Ok(TokenKind::EOF),
@@ -1031,15 +1054,14 @@ impl Parser {
 }
 
 impl Iterator for Parser {
-    type Item = ParseResult<Stmt>;
+    type Item = ParseResult<Decl>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.has_next() {
-            let test = self.parse();
-            if test.is_err() {
-                self.sync_parser_state();
+            match self.parse() {
+                Ok(decl) => Some(Ok(decl)),
+                Err(err) => Some(Err(err)),
             }
-            Some(test)
         } else {
             None
         }

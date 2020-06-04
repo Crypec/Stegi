@@ -28,7 +28,7 @@ impl<K: Eq + Hash + Clone, V: Clone> Cxt<K, V> {
         match self.0.last_mut() {
             Some(c) => {
                 c.insert(key, val);
-            },
+            }
             None => {
                 self.make();
                 self.insert(key, val);
@@ -36,7 +36,7 @@ impl<K: Eq + Hash + Clone, V: Clone> Cxt<K, V> {
         };
     }
 
-    pub fn get<'a>(&'a self, key: &'a K) -> Option<&'a V> {
-        self.0.last().unwrap().get(&key).clone()
+    pub fn get<'a>(&'a mut self, key: &'a K) -> Option<&'a mut V> {
+        self.0.last_mut().unwrap().get_mut(&key)
     }
 }

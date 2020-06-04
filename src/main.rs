@@ -1,5 +1,7 @@
+#![feature(box_syntax, box_patterns)]
 #![warn(clippy::pendantic)]
 #![allow(unused_imports)]
+#![allow(unused_variables)]
 #![allow(dead_code)]
 use std::path::PathBuf;
 
@@ -11,6 +13,7 @@ mod errors;
 mod formatter;
 mod interp;
 mod lexer;
+mod lowering;
 mod parser;
 mod session;
 mod typer;

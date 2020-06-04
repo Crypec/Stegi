@@ -7,6 +7,7 @@ use crate::ast::*;
 use crate::errors::*;
 use crate::interp::*;
 use crate::lexer::*;
+use crate::lowering::*;
 use crate::parser::*;
 
 #[derive(Debug, Clone)]
@@ -34,11 +35,14 @@ impl Driver {
             .collect::<Result<Vec<Token>, Diagnostic>>()
             .expect("failed to tokenize file");
         let t_stream = infer_semis(t_stream);
-        let ast = Parser::new(t_stream).collect::<Vec<Result<Stmt, Diagnostic>>>();
+        let ast = Parser::new(t_stream).collect::<Vec<Result<Decl, Diagnostic>>>();
         println!("{:#?}", now.elapsed());
         let (ast, errors): (Vec<_>, Vec<_>) = ast.into_iter().partition(Result::is_ok);
         let mut ast: Vec<_> = ast.into_iter().map(Result::unwrap).collect();
         // FIXME(Simon): these should be converted into UserDiagnostics
+
+        reorder(&mut ast);
+
         errors
             .into_iter()
             .map(Result::unwrap_err)
