@@ -209,6 +209,11 @@ pub enum Keyword {
     If,
     Then,
     Else,
+
+    // internal functions
+    Read,
+    Write,
+    Print,
 }
 
 impl Keyword {
@@ -226,6 +231,9 @@ impl Keyword {
             Keyword::If => "wenn",
             Keyword::Then => "dann",
             Keyword::Else => "sonst",
+            Keyword::Print => "#ausgabe",
+            Keyword::Read => "#lese",
+            Keyword::Write => "#schreibe",
         }
     }
 }
@@ -253,6 +261,9 @@ impl FromStr for Keyword {
             "sonst" => Ok(Keyword::Else),
             "stop" => Ok(Keyword::Break),
             "weiter" => Ok(Keyword::Continue),
+            "#lese" => Ok(Keyword::Read),
+            "#schreibe" => Ok(Keyword::Write),
+            "#ausgabe" => Ok(Keyword::Print),
             _ => Err(()),
         }
     }
@@ -413,6 +424,7 @@ impl<'a> Lexer<'a> {
                 Ok(tk) => tk,
                 Err(err) => return Some(Err(err)),
             },
+            '#' => self.intrinsic_fun(start),
             'a'..='z' | 'A'..='Z' => self.ident(start),
             '&' => match self.peek() {
                 Some('&') => {
@@ -496,6 +508,17 @@ impl<'a> Lexer<'a> {
             .map(TokenKind::Keyword)
             .or_else(|_| str::parse::<Operator>(&lexeme).map(TokenKind::Operator))
             .or_else(|_| str::parse::<Lit>(&lexeme).map(TokenKind::Lit))
+            .unwrap_or(TokenKind::Ident(lexeme))
+    }
+
+    fn intrinsic_fun(&mut self, start: usize) -> TokenKind {
+        self.advance();
+        self.advance_while(|&c| {
+            ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9') || c == '_'
+        });
+        let lexeme = self.sub_string(start);
+        str::parse::<Keyword>(&lexeme)
+            .map(TokenKind::Keyword)
             .unwrap_or(TokenKind::Ident(lexeme))
     }
 

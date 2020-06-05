@@ -1,6 +1,7 @@
 use crate::ast::*;
 
 use std::convert::From;
+use std::fmt;
 
 use crate::errors::*;
 use crate::lexer::Lit;
@@ -9,14 +10,62 @@ use std::collections::HashMap;
 use crate::ast::*;
 use crate::cxt::Cxt;
 
+macro_rules! cast(
+    ($val:expr, $p:path) => {
+        match $val {
+            $p(x) => x,
+            _ => {
+                let pat = stringify!($pat);
+                let val = stringify!($val);
+                panic!("Invalide Umwandlung, {:#?} entspricht nicht folgendem Muster: {:#?} dies ist wahrscheinlich ein Fehler im Typenchecker!", val, pat);
+            }
+        }
+    }
+);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Num(f64),
     Text(String),
     Bool(bool),
-    Object(HashMap<String, Value>),
+    Object(Path, HashMap<String, Value>),
     Tup(Vec<Value>),
     Array(Vec<Value>),
+    Fn(FnDecl),
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Value::Num(n) => write!(f, "{}", n),
+            Value::Text(t) => write!(f, "{}", t),
+            Value::Bool(b) => {
+                let str_bool = match b {
+                    true => "wahr",
+                    false => "falsch",
+                };
+                write!(f, "{}", str_bool)
+            }
+            Value::Array(arr) => {
+                let values = arr
+                    .iter()
+                    .map(|v| format!("{}", v))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "[{}]", values)
+            }
+            Value::Tup(tup) => {
+                let values = tup
+                    .iter()
+                    .map(|v| format!("{}", v))
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                write!(f, "({})", values)
+            }
+            Value::Object(path, obj) => write!(f, "{}: {:#?}", path, obj),
+            Value::Fn(fun) => write!(f, "{:#?}", fun),
+        }
+    }
 }
 
 impl Value {
@@ -39,7 +88,6 @@ pub struct Interp {
     // TODO(Simon): maybe we can refactor these into an "execution environment"?
     cxt: Cxt<String, Value>,
     ty_table: HashMap<String, TyDecl>,
-    fn_table: HashMap<String, FnDecl>,
 }
 
 //macro_rules! bin_op {
@@ -57,7 +105,11 @@ impl From<Lit> for Value {
     fn from(l: Lit) -> Self {
         match l {
             Lit::Number(n) => Value::Num(n),
-            Lit::String(t) => Value::Text(t),
+            Lit::String(t) => {
+                // FIXME(Simon): This is quite expensive as we have to do a memalloc and a memcopy for every string in the programm!
+                let t = &t[1..t.len() - 1];
+                Value::Text(t.to_string())
+            }
             Lit::Bool(b) => Value::Bool(b),
         }
     }
@@ -68,7 +120,6 @@ impl Interp {
         Self {
             cxt: Cxt::new(),
             ty_table: HashMap::new(),
-            fn_table: HashMap::new(),
         }
     }
 
@@ -82,24 +133,24 @@ impl Interp {
     }
 
     fn call_fn(&mut self, callee: &Expr, args: &Vec<Expr>) -> Result<Value, Diagnostic> {
-        match callee.node {
-            ExprKind::Path(ref p) => {
-                let name = p.first().unwrap().lexeme.clone();
-                let fn_decl = self.fn_table.get(&name).unwrap().clone();
+        let callee = self.eval(callee)?;
 
-                debug_assert_eq!(args.len(), fn_decl.header.params.len());
-
-                self.cxt.make();
-                for (param, arg) in fn_decl.header.params.iter().zip(args.iter()) {
-                    let arg_val = self.eval(arg)?;
-                    self.cxt.insert(param.name.lexeme.clone(), arg_val);
-                }
-                self.run_block(&mut fn_decl.body.clone())?;
-                self.cxt.drop();
-                todo!();
-            }
-            _ => todo!(),
+        let mut args_eval = Vec::new();
+        for arg in args {
+            args_eval.push(self.eval(arg)?);
         }
+        let fun = cast!(callee, Value::Fn);
+        let params = fun.header.params;
+        debug_assert_eq!(args_eval.len(), params.len());
+
+        self.cxt.make_clean();
+
+        for (p, a) in params.iter().zip(args_eval.into_iter()) {
+            let name = p.name.lexeme.clone();
+            self.cxt.insert(name, a);
+        }
+
+        Ok(Value::Num(0.0))
     }
 
     pub fn eval(&mut self, e: &Expr) -> Result<Value, Diagnostic> {
@@ -186,7 +237,7 @@ impl Interp {
                 Ok(self.cxt.get(&name).unwrap().clone())
             }
             ExprKind::Struct {
-                path: _,
+                ref path,
                 ref members,
             } => {
                 let mut obj = HashMap::new();
@@ -195,7 +246,7 @@ impl Interp {
                     let val = self.eval(&field.init.clone())?;
                     obj.insert(name, val);
                 }
-                Ok(Value::Object(obj))
+                Ok(Value::Object(path.clone(), obj))
             }
             ExprKind::Tup(ref elems) => {
                 // TODO(Simon): refactor this to use a nice iterator
@@ -247,6 +298,18 @@ impl Interp {
                 ref args,
             } => self.call_fn(&callee, &args),
             ExprKind::Val(ref v) => Ok(v.clone()),
+            ExprKind::Intrinsic { ref kind, ref args } => match kind {
+                Intrinsic::Print => {
+                    //let fmt = cast!(self.eval(args.get(0).unwrap())?, Value::Text);
+                    let mut args_eval = Vec::new();
+                    for arg in args {
+                        args_eval.push(self.eval(arg)?);
+                    }
+                    println!("{}", args_eval[0]);
+                    Ok(Value::Num(0.0))
+                }
+                _ => todo!(),
+            },
         }
     }
 
@@ -254,7 +317,7 @@ impl Interp {
         for decl in ast {
             if let Decl::Fn(f) = decl {
                 let name = f.header.name.lexeme.clone();
-                self.fn_table.insert(name, f.clone());
+                self.cxt.insert(name, Value::Fn(f.clone()));
             }
         }
     }
@@ -275,9 +338,13 @@ impl Interp {
         for d in ast.iter_mut() {
             if let Decl::Fn(f) = d {
                 // TODO(Simon): we could clean this up a bit
+                // let found_main = false;
                 if f.header.name.lexeme == "Start" {
                     self.run_block(&mut f.body);
                 }
+                // if !found_main {
+                //     self.span
+                // }
             }
         }
     }
@@ -300,7 +367,6 @@ impl Visitor for Interp {
                 let val = self.eval(&v.init)?;
                 let name = &v.pat.lexeme;
                 self.cxt.insert(name.clone(), val);
-                println!("{:#?}", self.eval(&v.init));
             }
             Stmt::If {
                 ref cond,

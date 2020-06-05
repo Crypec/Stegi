@@ -156,6 +156,6 @@ impl fmt::Display for Path {
             .map(|s| s.lexeme.clone())
             .collect::<Vec<String>>()
             .join("::");
-        writeln!(f, "{}", p)
+        write!(f, "{}", p)
     }
 }

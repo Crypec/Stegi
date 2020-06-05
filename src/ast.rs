@@ -47,12 +47,18 @@ pub enum ExprKind {
     /// one sided expression
     /// example: -    3
     ///          ^-op ^-rhs
-    Unary { rhs: Box<Expr>, op: UnaryOp },
+    Unary {
+        rhs: Box<Expr>,
+        op: UnaryOp,
+    },
 
     /// struct literals are used to initialize objects with values
     /// example: Person {name: "Torben"}
     ///          ^-pat  ^^^^^^^^^^^^^^- member with name and init expr
-    Struct { path: Path, members: Vec<Member> },
+    Struct {
+        path: Path,
+        members: Vec<Member>,
+    },
 
     /// a tuple expression is just a collection of other expressions
     /// example: (20,    20)
@@ -69,7 +75,10 @@ pub enum ExprKind {
     /// used to represent all sorts of index expressions
     /// example: foo[     expr     ]
     ///          ^-callee ^index
-    Index { callee: Box<Expr>, index: Box<Expr> },
+    Index {
+        callee: Box<Expr>,
+        index: Box<Expr>,
+    },
 
     /// array literals are used to initialize arrays with values
     /// example: [1, 2, 3, 4, 5]
@@ -109,10 +118,25 @@ pub enum ExprKind {
     /// refers to a live object or value, this basically represents an evaluated expression
     Val(Value),
 
+    Intrinsic {
+        kind: Intrinsic,
+        args: Vec<Expr>,
+    },
+
     /// function call e.g. foo(-42, 1, 1)
     /// example: foo    (-42,     10)
     ///          ^-callee ^-arg0  ^-arg1
-    Call { callee: Box<Expr>, args: Vec<Expr> },
+    Call {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum Intrinsic {
+    Read,
+    Write,
+    Print,
 }
 
 #[derive(Clone, PartialEq, Derivative)]
@@ -181,8 +205,8 @@ impl TyDecl {
     }
 }
 
-#[derive(Derivative)]
-#[derivative(Debug, Clone)]
+#[derive(Clone, PartialEq, Derivative)]
+#[derivative(Debug)]
 pub struct FnDecl {
     pub header: FnSig,
     pub body: Block,

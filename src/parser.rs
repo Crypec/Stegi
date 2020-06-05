@@ -692,7 +692,7 @@ impl Parser {
         TokenKind::Operator(Operator::EqEq) | TokenKind::Operator(Operator::NotEq)
     );
     // comparison → term ( ( ">" | ">=" | "<" | "<=" ) term )*
-    binary_impl!(
+    logical_impl!(
         parse_cmp,
         parse_term,
         TokenKind::Operator(Operator::Greater)
@@ -776,8 +776,123 @@ impl Parser {
                     },
                 })
             }
+            TokenKind::Keyword(Keyword::Print)
+            | TokenKind::Keyword(Keyword::Read)
+            | TokenKind::Keyword(Keyword::Write) => self.parse_intrinsic(),
             _ => self.parse_call(),
         }
+    }
+
+    fn parse_intrinsic(&mut self) -> ParseResult<Expr> {
+        match self.peek_kind()? {
+            TokenKind::Keyword(Keyword::Print) => self.parse_print(),
+            TokenKind::Keyword(Keyword::Read) => self.parse_read(),
+            TokenKind::Keyword(Keyword::Write) => self.parse_print(),
+            _ => unreachable!(),
+        }
+    }
+
+    fn parse_print(&mut self) -> ParseResult<Expr> {
+        let start = self
+            .expect(TokenKind::Keyword(Keyword::Print), "Ausgabe schluesselwort")?
+            .span;
+        self.expect(
+            TokenKind::LParen,
+            "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
+        )?;
+        let mut args = Vec::new();
+        args.push(self.parse_expr()?);
+        loop {
+            match self.peek_kind()? {
+                TokenKind::RParen => break,
+                _ => {
+                    self.expect(TokenKind::Comma, "Auch bei intrinsichen Funktionen werden Argumente mit einem Komma getrennt!")?;
+                    args.push(self.parse_expr()?);
+                }
+            }
+        }
+        let end = self.expect(TokenKind::RParen, "Es scheint als haettest du eine schliessende Klammer fuer den #ausgabe befehl vergessen")?.span;
+        let span = start.combine(&end);
+        Ok(Expr {
+            node: ExprKind::Intrinsic {
+                kind: Intrinsic::Print,
+                args,
+            },
+            span,
+            ty: Ty {
+                kind: TyKind::Infer,
+                span,
+            },
+        })
+    }
+
+    fn parse_read(&mut self) -> ParseResult<Expr> {
+        let start = self
+            .expect(
+                TokenKind::Keyword(Keyword::Read),
+                "An dieser stelle haben wir den intrinsichen Lese Befehl erwartet!",
+            )?
+            .span;
+        self.expect(
+            TokenKind::LParen,
+            "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
+        )?;
+        let file_name = self.parse_expr()?;
+        let end = self
+            .expect(
+                TokenKind::RParen,
+                "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
+            )?
+            .span;
+        let span = start.combine(&end);
+        Ok(Expr {
+            node: ExprKind::Intrinsic {
+                kind: Intrinsic::Read,
+                args: vec![file_name],
+            },
+            span,
+            ty: Ty {
+                kind: TyKind::Infer,
+                span,
+            },
+        })
+    }
+
+    fn parse_write(&mut self) -> ParseResult<Expr> {
+        let start = self
+            .expect(
+                TokenKind::Keyword(Keyword::Read),
+                "An dieser stelle haben wir den intrinsichen Lese Befehl erwartet!",
+            )?
+            .span;
+        self.expect(
+            TokenKind::LParen,
+            "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
+        )?;
+        let file_name = self.parse_expr()?;
+        self.expect(
+            TokenKind::Comma,
+            "Auch die Argumente einer intrinsichen Funktion werden mit einem Komma getrennt",
+        )?;
+        let content = self.parse_expr()?;
+        let end = self
+            .expect(
+                TokenKind::RParen,
+                "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
+            )?
+            .span;
+        let span = start.combine(&end);
+        Ok(Expr {
+            node: ExprKind::Intrinsic {
+                kind: Intrinsic::Write,
+                args: vec![file_name, content],
+            },
+            span,
+            ty: Ty {
+                kind: TyKind::Infer,
+                span,
+            },
+        })
     }
 
     fn parse_struct_lit(&mut self, path: Path) -> ParseResult<Expr> {
