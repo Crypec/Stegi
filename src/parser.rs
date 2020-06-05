@@ -1204,6 +1204,14 @@ mod tests {
             .map(Result::unwrap)
             .collect::<Vec<_>>();
         let t_stream = infer_semis(t_stream);
+        Parser::new(t_stream).parse_stmt(BlockParsingMode::Normal).unwrap()
+    }
+
+    fn parse_decl_setup(test: &str) -> Decl {
+        let t_stream = Lexer::new(&test.to_string())
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
+        let t_stream = infer_semis(t_stream);
         Parser::new(t_stream).parse().unwrap()
     }
 
@@ -1344,31 +1352,35 @@ mod tests {
 
     #[test]
     fn parse_fn_decl_no_param_void() {
-        let actual = parse_stmt_setup("fun test() {}");
-        let expected = Stmt::FnDecl(FnDecl {
-            head: FnSig {
+        let actual = parse_decl_setup("fun test() {}");
+        let expected = Decl::Fn(FnDecl {
+            header: FnSig {
                 name: ident!(test),
                 params: Vec::new(),
                 ret_ty: unit_ty(),
+                span: span(),
             },
             body: block(Vec::new()),
+            span: span(),
         });
         assert_eq!(expected, actual);
     }
 
     #[test]
     fn parse_fn_decl_multi_param_void() {
-        let actual = parse_stmt_setup("fun test(x: Zahl, y: [Test]) {}");
-        let expected = Stmt::FnDecl(FnDecl {
-            head: FnSig {
+        let actual = parse_decl_setup("fun test(x: Zahl, y: [Test]) {}");
+        let expected = Decl::Fn(FnDecl {
+            header: FnSig {
                 name: ident!(test),
                 params: vec![
                     param(ident!(x), path_ty(path!(Zahl))),
                     param(ident!(y), array_ty(path_ty(path!(Test)))),
                 ],
                 ret_ty: unit_ty(),
+                span: span(),
             },
             body: block(Vec::new()),
+            span: span(),
         });
         assert_eq!(expected, actual);
     }
@@ -1450,9 +1462,9 @@ rueckgabe selbst == 0;
 }
 "#
         .to_string();
-        let actual = parse_stmt_setup(&prog);
+        let actual = parse_decl_setup(&prog);
         let expr = cmp(this(), num(0), CmpOp::EqEq);
-        let expected = Stmt::ImplBlock {
+        let expected = Decl::Impl {
             target: path!(Mathe::Zahl),
             fn_decls: vec![fn_decl(
                 ident!(ist_null),
@@ -1470,8 +1482,8 @@ rueckgabe selbst == 0;
         let prog = r#"
 typ Wochentag = Montag | Dienstag | Mittwoch | Donnerstag | Freitag | Samstag | Sonntag
 "#;
-        let actual = parse_stmt_setup(&prog);
-        let expected = Stmt::EnumDecl {
+        let actual = parse_decl_setup(&prog);
+        let expected = Decl::TyDecl(TyDecl::Enum(Enum {
             name: ident!(Wochentag),
             variants: vec![
                 variant(ident!(Montag), VariantData::Unit),
@@ -1483,7 +1495,8 @@ typ Wochentag = Montag | Dienstag | Mittwoch | Donnerstag | Freitag | Samstag | 
                 variant(ident!(Sonntag), VariantData::Unit),
             ],
             span: span(),
-        };
+            methods: Vec::new(),
+        }));
         assert_eq!(actual, expected);
     }
 
@@ -1496,9 +1509,9 @@ pos: Zahl,
 kapazitaet: Zahl,
 }
 "#;
-        let actual = parse_stmt_setup(&prog);
+        let actual = parse_decl_setup(&prog);
 
-        let expected = Stmt::StructDecl(StructDecl {
+        let expected = Decl::TyDecl(TyDecl::Struct(Struct {
             name: ident!(Liste),
             fields: vec![
                 Field {
@@ -1517,24 +1530,27 @@ kapazitaet: Zahl,
                     span: span(),
                 },
             ],
+            methods: Vec::new(),
             span: span(),
-        });
+        }));
         assert_eq!(actual, expected);
     }
     #[test]
     fn parse_enum_decl_val_types() {
-        let actual = parse_stmt_setup("typ Feld = Spieler(Text) | Leer");
-        let expected = Stmt::EnumDecl {
-            name: ident!(Feld),
-            variants: vec![
-                variant(
-                    ident!(Spieler),
-                    VariantData::Val(vec![path_ty(path!(Text))]),
-                ),
-                variant(ident!(Leer), VariantData::Unit),
-            ],
+        let actual = parse_decl_setup("typ Feld = Spieler(Text) | Leer");
+        let expected = Decl::TyDecl(TyDecl::Enum(Enum{
+                name: ident!(Feld),
+                variants: vec![
+                    variant(
+                        ident!(Spieler),
+                        VariantData::Val(vec![path_ty(path!(Text))]),
+                    ),
+                    variant(ident!(Leer), VariantData::Unit),
+                ],
+            methods: vec![],
             span: span(),
-        };
+            }
+        )) ;
         assert_eq!(actual, expected);
     }
 

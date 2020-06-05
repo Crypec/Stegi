@@ -159,7 +159,7 @@ impl Member {
     }
 }
 
-#[derive(Clone, Derivative)]
+#[derive(Clone, PartialEq, Derivative)]
 #[derivative(Debug)]
 pub struct Struct {
     pub name: Ident,
@@ -171,7 +171,7 @@ pub struct Struct {
     pub span: Span,
 }
 
-#[derive(Clone, Derivative)]
+#[derive(Clone, PartialEq, Derivative)]
 #[derivative(Debug)]
 pub struct Enum {
     pub name: Ident,
@@ -182,7 +182,7 @@ pub struct Enum {
     pub span: Span,
 }
 
-#[derive(Clone, Derivative)]
+#[derive(Clone, PartialEq, Derivative)]
 #[derivative(Debug)]
 pub enum TyDecl {
     Struct(Struct),
@@ -203,6 +203,10 @@ impl TyDecl {
             TyDecl::Struct(s) => s.methods.append(&mut methods),
         }
     }
+
+    pub fn get_method(&self, name: &str) {
+        todo!();
+    }
 }
 
 #[derive(Clone, PartialEq, Derivative)]
@@ -213,7 +217,7 @@ pub struct FnDecl {
     pub span: Span,
 }
 
-#[derive(Derivative)]
+#[derive(PartialEq, Clone, Derivative)]
 #[derivative(Debug)]
 pub enum Decl {
     TyDecl(TyDecl),
@@ -663,12 +667,14 @@ pub mod dsl {
 
     pub fn fn_decl(name: Ident, params: Vec<Param>, ret_ty: Ty, body: Block) -> FnDecl {
         FnDecl {
-            head: FnSig {
+            header: FnSig {
                 name,
                 params,
                 ret_ty,
+                span: span(),
             },
             body,
+            span: span(),
         }
     }
 
