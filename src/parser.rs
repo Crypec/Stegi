@@ -1204,7 +1204,9 @@ mod tests {
             .map(Result::unwrap)
             .collect::<Vec<_>>();
         let t_stream = infer_semis(t_stream);
-        Parser::new(t_stream).parse_stmt(BlockParsingMode::Normal).unwrap()
+        Parser::new(t_stream)
+            .parse_stmt(BlockParsingMode::Normal)
+            .unwrap()
     }
 
     fn parse_decl_setup(test: &str) -> Decl {
@@ -1538,19 +1540,18 @@ kapazitaet: Zahl,
     #[test]
     fn parse_enum_decl_val_types() {
         let actual = parse_decl_setup("typ Feld = Spieler(Text) | Leer");
-        let expected = Decl::TyDecl(TyDecl::Enum(Enum{
-                name: ident!(Feld),
-                variants: vec![
-                    variant(
-                        ident!(Spieler),
-                        VariantData::Val(vec![path_ty(path!(Text))]),
-                    ),
-                    variant(ident!(Leer), VariantData::Unit),
-                ],
+        let expected = Decl::TyDecl(TyDecl::Enum(Enum {
+            name: ident!(Feld),
+            variants: vec![
+                variant(
+                    ident!(Spieler),
+                    VariantData::Val(vec![path_ty(path!(Text))]),
+                ),
+                variant(ident!(Leer), VariantData::Unit),
+            ],
             methods: vec![],
             span: span(),
-            }
-        )) ;
+        }));
         assert_eq!(actual, expected);
     }
 
