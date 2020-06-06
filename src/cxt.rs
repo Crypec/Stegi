@@ -20,6 +20,10 @@ impl<K: Eq + Hash + Clone, V: Clone> Cxt<K, V> {
         self.0.push(env)
     }
 
+    pub fn make_clean(&mut self) {
+        self.0.push(HashMap::new());
+    }
+
     pub fn drop(&mut self) {
         self.0.pop();
     }

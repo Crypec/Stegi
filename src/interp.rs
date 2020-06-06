@@ -123,13 +123,17 @@ impl Interp {
         }
     }
 
-    fn run_block(&mut self, block: &mut Block) -> Result<Value, Diagnostic> {
+    fn run_block(&mut self, block: &mut Block) -> Result<Option<Value>, Diagnostic> {
         self.cxt.make();
         for stmt in block.stmts.iter_mut() {
-            stmt.accept(self)?;
+            let ret = stmt.accept(self)?;
+            if let Some(_) = ret {
+                self.cxt.drop();
+                return Ok(ret);
+            }
         }
         self.cxt.drop();
-        Ok(Value::Num(0.0))
+        Ok(None)
     }
 
     fn call_fn(&mut self, callee: &Expr, args: &Vec<Expr>) -> Result<Value, Diagnostic> {
@@ -139,18 +143,23 @@ impl Interp {
         for arg in args {
             args_eval.push(self.eval(arg)?);
         }
-        let fun = cast!(callee, Value::Fn);
+        let mut fun = cast!(callee, Value::Fn);
         let params = fun.header.params;
         debug_assert_eq!(args_eval.len(), params.len());
 
-        self.cxt.make_clean();
+        // FIXME(Simon): this needs to be a call to make_clean()!!!
+        self.cxt.make();
 
         for (p, a) in params.iter().zip(args_eval.into_iter()) {
             let name = p.name.lexeme.clone();
             self.cxt.insert(name, a);
         }
-
-        Ok(Value::Num(0.0))
+        let ret = self.run_block(&mut fun.body)?;
+        self.cxt.drop();
+        match ret {
+            Some(val) => Ok(val),
+            None => Ok(Value::Tup(Vec::new())),
+        }
     }
 
     pub fn eval(&mut self, e: &Expr) -> Result<Value, Diagnostic> {
@@ -228,13 +237,18 @@ impl Interp {
             // NOTE(Simon): this clone may be unecessary if we decide to mutate the ast on the fly
             ExprKind::Lit(ref l) => Ok(l.clone().into()),
             ExprKind::Path(ref p) => {
-                let name = &p.first().unwrap().lexeme;
-                debug_assert!(
-                    self.cxt.get(&name).is_some(),
-                    "Fehlende Variablen sollten eigentlich vom Typchecker erkannt werden!"
-                );
-                // FIXME(Simon): as always: we don't really need this clone
-                Ok(self.cxt.get(&name).unwrap().clone())
+                if p.len() > 1 {
+                    // TODO(Simon): lookup method in typdecl in ty_table
+                    todo!()
+                } else {
+                    let name = &p.first().unwrap().lexeme;
+                    debug_assert!(
+                        self.cxt.get(&name).is_some(),
+                        "Fehlende Variablen sollten eigentlich vom Typchecker erkannt werden!"
+                    );
+                    // FIXME(Simon): as always: we don't really need this clone
+                    Ok(self.cxt.get(&name).unwrap().clone())
+                }
             }
             ExprKind::Struct {
                 ref path,
@@ -351,14 +365,14 @@ impl Interp {
 }
 
 impl Visitor for Interp {
-    type Result = Result<Value, Diagnostic>;
+    type Result = Result<Option<Value>, Diagnostic>;
 
     fn visit_decl(&mut self, d: &mut Decl) -> Self::Result {
-        todo!();
+        todo!()
     }
 
     fn visit_expr(&mut self, e: &mut Expr) -> Self::Result {
-        self.eval(e)
+        Ok(Some(self.eval(e)?))
     }
 
     fn visit_stmt(&mut self, s: &mut Stmt) -> Self::Result {
@@ -367,6 +381,7 @@ impl Visitor for Interp {
                 let val = self.eval(&v.init)?;
                 let name = &v.pat.lexeme;
                 self.cxt.insert(name.clone(), val);
+                Ok(None)
             }
             Stmt::If {
                 ref cond,
@@ -376,19 +391,25 @@ impl Visitor for Interp {
                 ref span,
             } => {
                 if self.eval(cond)?.truthy() {
-                    self.run_block(body)?;
+                    let ret = self.run_block(body)?;
+                    if let Some(_) = ret {
+                        return Ok(ret);
+                    }
                 } else {
                     for branch in else_branches.iter_mut() {
                         if self.eval(&branch.cond)?.truthy() {
                             self.run_block(&mut branch.body)?;
-                            return Ok(Value::Num(2.0));
+                            return Ok(None);
                         }
                     }
                     if let Some(fb) = final_branch {
-                        self.run_block(&mut fb.body)?;
+                        let ret = self.run_block(&mut fb.body)?;
+                        if let Some(_) = ret {
+                            return Ok(ret);
+                        }
                     }
                 }
-                todo!();
+                Ok(None)
             }
             Stmt::For {
                 ref vardef,
@@ -404,12 +425,18 @@ impl Visitor for Interp {
 				};
                 for elem in arr {
                     self.cxt.insert(loop_var.clone(), elem);
-                    self.run_block(body)?;
+                    let ret = self.run_block(body)?;
+                    if let Some(_) = ret {
+                        self.cxt.drop();
+                        return Ok(ret);
+                    }
                 }
                 self.cxt.drop();
+                Ok(None)
             }
             Stmt::Expr(ref e) => {
                 self.eval(e)?;
+                Ok(None)
             }
             Stmt::While {
                 ref cond,
@@ -417,8 +444,12 @@ impl Visitor for Interp {
                 ref span,
             } => {
                 while self.eval(cond)?.truthy() {
-                    self.run_block(body)?;
+                    let ret = self.run_block(body)?;
+                    if let Some(_) = ret {
+                        return Ok(ret);
+                    }
                 }
+                Ok(None)
             }
             Stmt::Assign {
                 ref lhs,
@@ -436,12 +467,9 @@ impl Visitor for Interp {
                 dbg!(rhs);
                 todo!();
             }
-            Stmt::Block(ref mut block) => {
-                self.run_block(block)?;
-            }
+            Stmt::Block(ref mut block) => Ok(self.run_block(block)?),
             Stmt::Break(_) | Stmt::Continue(_) => todo!(),
-            Stmt::Ret(_, _) => todo!(),
-        };
-        return Ok(Value::Text("test".to_string()));
+            Stmt::Ret(ref e, _) => Ok(Some(self.eval(e)?)),
+        }
     }
 }
