@@ -240,7 +240,7 @@ pub enum Stmt {
     VarDef(VarDef),
 
     /// An assignment stmt can be used to change the value of an already defined variable
-    /// NOTE: it's type is fixed and must be equal on both
+    /// NOTE: it's type is fixed and must be equal on both sides
     /// example: a.b    = 20
     ///          ^-callee ^value
     Assign {
@@ -287,7 +287,7 @@ pub enum Stmt {
 #[derive(Clone, Derivative)]
 #[derivative(Debug, PartialEq)]
 pub struct VarDef {
-    pub pat: Ident, // TODO(Simon): replace with propper pattern
+    pub pat: Ident, // TODO(Simon): replace with proper pattern
     pub ty: Ty,
     pub init: Expr,
 

@@ -6,6 +6,7 @@ use crate::session::SourceMap;
 use crate::typer::TyKind;
 
 use colored::*;
+use failure::_core::intrinsics::wrapping_add;
 
 #[derive(Debug, Clone)]
 pub enum ErrKind {
@@ -41,6 +42,16 @@ pub enum SyntaxErr {
     UnexpectedEOF,
 }
 
+
+impl fmt::Display for SyntaxErr {
+     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SyntaxErr::UnxpectedChar(c) => write!(f, "Wir denken das Zeichen : ´{}´ gehört dort nicht hin.", c),
+            SyntaxErr::UnterminatedString => write!(f, "Wir denken du hast vergessen einen Text zu schließen"),
+        }
+     }
+}
+
 #[derive(Debug, Clone)]
 pub enum TypeErr {
     VarNotFound(String),
@@ -54,6 +65,7 @@ pub enum TypeErr {
 pub enum RuntimeError {
     OutOfBounds(isize),
 }
+
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {

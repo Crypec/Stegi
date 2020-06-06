@@ -163,12 +163,12 @@ impl Parser {
         let start = self
             .expect(
                 TokenKind::Keyword(Keyword::Fun),
-                "An dieser Stelle haben wir das `funktion` Schluesselwort erwartet!",
+                "An dieser Stelle haben wir das `fun` Schluesselwort erwartet!",
             )?
             .span;
 
         let name = self.parse_ident()?;
-        self.expect(TokenKind::LParen, "Funktionsnamen")?;
+        self.expect(TokenKind::LParen, "An dieser Stelle haben wir eine oeffnende Klammer: ´(´ erwartet!")?;
 
         let mut params = Vec::new();
 
@@ -184,7 +184,7 @@ impl Parser {
                     };
                     params.push(Param::new(Ident::new("selbst".into(), sp), self_ty, sp));
                     if self.peek_kind()? != TokenKind::RParen {
-                        self.expect(TokenKind::Comma, "Nach dem `selbst` Parameter und den restlichen Parameter der Funktion haben wir ein Komma erwartet!")?;
+                        self.expect(TokenKind::Comma, "Nach dem `selbst` Parameter und den restlichen Parametern der Funktion haben wir ein Komma erwartet!")?;
                     }
                 }
             }
