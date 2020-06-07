@@ -3,10 +3,10 @@ use std::fmt;
 use crate::ast::Span;
 use crate::lexer::TokenKind;
 use crate::session::SourceMap;
+use crate::typer::Ty;
 use crate::typer::TyKind;
 
 use colored::*;
-use failure::_core::intrinsics::wrapping_add;
 
 #[derive(Debug, Clone)]
 pub enum ErrKind {
@@ -32,6 +32,7 @@ pub enum SyntaxErr {
     },
 
     ExpectedTy,
+
     ExpectedExpr,
 
     InvalidAssignmentTarget,
@@ -42,14 +43,22 @@ pub enum SyntaxErr {
     UnexpectedEOF,
 }
 
-
 impl fmt::Display for SyntaxErr {
-     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SyntaxErr::UnxpectedChar(c) => write!(f, "Wir denken das Zeichen : ´{}´ gehört dort nicht hin.", c),
-            SyntaxErr::UnterminatedString => write!(f, "Wir denken du hast vergessen einen Text zu schließen"),
-        }
-     }
+            SyntaxErr::UnexpectedChar(c) => write!(f, "Wir denken das Zeichen : ´{}´ gehört dort nicht hin.", c),
+            SyntaxErr::UnterminatedString => write!(f, "Wir denken du hast vergessen einen Text zu schließen."),
+            SyntaxErr::SelfOutsideImpl => write!(f, "Du hast vergessen die Methode in einen Implementierungsblock zu schreiben. Versuche die Funktion in einen Implementierungsblock zu schreiben."),
+            SyntaxErr::MissingToken{expected, actual} => write!(f, "Wir haben hier eher ´{:?}´ erwartet, als {}. Versuche doch {:?} durch {} zu ersetzen.", expected, actual, expected, actual),
+            SyntaxErr::ExpectedTy => write!(f, "An dieser Stelle haben wir einen Datentypen erwartet!"),
+            SyntaxErr::ExpectedExpr => write!(f, "An dieser Stelle haben wir einen mathematischen Ausdurck erwartet!"),
+            SyntaxErr::InvalidAssignmentTarget => write!(f, "Der folgende Ausdruck ist nicht als Zuweisungsziel erlaubt."),
+            SyntaxErr::InvalidVarDefTarget => write!(f, "Wir denken du hast hier ein falsches Zuweisungsziel ausgewählt. Der Zuweisungsoperator ´:=´ erlaubt dir Variablen zu definieren um in diesen einen Wert zu speichern."),
+            SyntaxErr::UnbalancedParen => write!(f,"Schau bitte ob du irgendwo Klammern vergessen oder zu viel gesetzt hast. Wir aben hier eine Ungleicheit zwischen offenen und geschlossenen Klammern festgestellt."),
+            SyntaxErr::BreakOutsideLoop => write!(f, "Wir denken wir haben ein `break` aushalb einer schleife entdeckt. Schau bitte, dass break nur in einer Schleife vorkommt."),
+            SyntaxErr::UnexpectedEOF => write!(f, "Wir haben unerwartet das Ende der Datei erreicht! Schau bitte, dass du dein Code vollständig schreibst und richtig abschließt!")
+        } //Torben
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -58,14 +67,31 @@ pub enum TypeErr {
     InvalidType,
     // TODO(Simon): this should really be a ty instead of just a tykind, we need the span to do proper error reporting
     InfRec(TyKind, TyKind),
-    FieldNotFound,
+    FieldNotFound { ty: Ty, field: String },
+}
+
+impl fmt::Display for TypeErr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self{
+            TypeErr:: VarNotFound(varname) => write!(f, "Diese Variable `{}` haben wir nicht gefunden. Bitte Definiere und Initialisiere sie, bevor du sie benutzt.", varname),
+            TypeErr::InvalidType => write!(f, "Du hast hier einen Typ benutzt der entweder gar nicht existiert oder hier nicht funktioniert. Bitte schau da nochmal drüber."),
+            TypeErr::InfRec(a, b) => write!(f, "Unendlich rekursiver Typ entdeckt! Typ: {}, kommt in {} vor!!!", a, b),
+            TypeErr::FieldNotFound{ty, field} => write!(f, "Der Datentyp {} hat kein Feld mit dem Namen {}!", ty, field)
+        } //torben
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
-    OutOfBounds(isize),
+    OutOfBounds { index: isize, len: usize },
 }
-
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self{
+            RuntimeError::OutOfBounds{index, len} => write!(f, "Du hast versucht auf einen Index außerhalb des Feldes zuzugreifen, die Länge des Feldes beträgt {}. Du hast versucht auf die Postition {} zuzugreifen!", len, index)
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {

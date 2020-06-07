@@ -168,7 +168,10 @@ impl Parser {
             .span;
 
         let name = self.parse_ident()?;
-        self.expect(TokenKind::LParen, "An dieser Stelle haben wir eine oeffnende Klammer: ´(´ erwartet!")?;
+        self.expect(
+            TokenKind::LParen,
+            "An dieser Stelle haben wir eine öffnende Klammer `(` erwartet!",
+        )?;
 
         let mut params = Vec::new();
 
@@ -197,14 +200,14 @@ impl Parser {
         }
         while self.peek_kind()? != TokenKind::RParen {
             let p_name = self.parse_ident()?;
-            self.expect(TokenKind::Colon, "Parametername")?;
+            self.expect(TokenKind::Colon, "Name und Typ eines Funktionsparameters werden durch einen `:` voneinander getrennt!")?;
             let p_ty = self.parse_ty_specifier()?;
             let sp = p_name.span.clone().combine(&p_ty.span.clone());
             params.push(Param::new(p_name.clone(), p_ty.clone(), sp));
 
             match self.peek_kind()? {
                 TokenKind::RParen => break,
-                _ => self.expect(TokenKind::Comma, "Functionsparameter")?,
+                _ => self.expect(TokenKind::Comma, "Die einzelnen Parameter einer Funktion werden durch ein Komma `,` voneinander getrennt!")?,
             };
         }
         let closing = self.expect(TokenKind::RParen, "Rueckgabetyp")?;
@@ -237,7 +240,12 @@ impl Parser {
     }
 
     fn parse_block(&mut self, mode: BlockParsingMode) -> ParseResult<Block> {
-        let start = self.expect(TokenKind::LBrace, "{ vor Block erwartet")?.span;
+        let start = self
+            .expect(
+                TokenKind::LBrace,
+                "Geschweifte Klammer { vor Block erwartet",
+            )?
+            .span;
 
         let mut block = Vec::new();
         while self.peek_kind()? != TokenKind::RBrace {
@@ -305,7 +313,7 @@ impl Parser {
         loop {
             match (self.peek_kind()?, self.look_ahead(2)?) {
                 (TokenKind::Keyword(Keyword::Else), TokenKind::Keyword(Keyword::If)) => {
-                    else_branches.push(self.parse_else_branch(mode)?)
+                    else_branches.push(self.parse_elif_branch(mode)?)
                 }
                 _ => break,
             }
@@ -340,15 +348,15 @@ impl Parser {
         })
     }
 
-    fn parse_else_branch(&mut self, mode: BlockParsingMode) -> ParseResult<ElseBranch> {
-        let start = self.expect(TokenKind::Keyword(Keyword::Else), "An dieser Stelle haben wir das `sonst` Schluesselwort erwartet! Es erlaubt dir nach neben einem `wenn` Befehl noch weitere Bedingung zu beachten.")?.span;
+    fn parse_elif_branch(&mut self, mode: BlockParsingMode) -> ParseResult<ElseBranch> {
+        let start = self.expect(TokenKind::Keyword(Keyword::Else), "An dieser Stelle haben wir das `sonst` Schluesselwort erwartet! Es erlaubt dir nach einem primaeren `wenn` Befehl noch weitere Bedingung zu beachten.")?.span;
         self.expect(TokenKind::Keyword(Keyword::If), "An dieser Stelle haben wir das `wenn` Schluesselwort erwartet! Es erlaubt dir feinere Entscheidungen nach einem `sonst` Befehl zu treffen")?;
 
         let cond = self.parse_expr()?;
 
         self.expect(
             TokenKind::Keyword(Keyword::Then),
-            "Einem `wenn` muss auch ein `dann` folgen!",
+            "Wenn du eine 'Wenn-dann'-Abfrage machst, muss auf das 'Wenn' immer ein 'dann' folgen, so wissen wir, was wir machen müssen wenn das 'wenn'-statement erfüllt ist,Einem `wenn` muss auch ein `dann` folgen!",//torben
         )?;
         let body = self.parse_block(mode)?;
         let span = start.combine(&body.span.clone());
@@ -359,7 +367,7 @@ impl Parser {
         let start = self
             .expect(
                 TokenKind::Keyword(Keyword::Return),
-                "Rueckgabe schluesselwort",
+                "Wenn du etwas zuruückgeben willst musst du das Wort 'Rückgabe' benutzen, es zeigt uns was du zurückgeben willst! Das was du zurückgeben willst muss immer hinter 'Rückgabe'stehen. Als letztes kommt immer ein Semikolon(;)! Rueckgabe schluesselwort",//torben
             )?
             .span;
         let ret_val = match self.peek_kind()? {
@@ -367,7 +375,7 @@ impl Parser {
             _ => self.parse_expr()?,
         };
         let end = self
-            .expect(TokenKind::Semi, "; nach rueckgabe erwartet")?
+            .expect(TokenKind::Semi, "Wenn du etwas zurückgeben willst musst du immer ein Semikolon `;` dahinter schreiben!(; nach rueckgabe erwartet)")?//Torben
             .span;
         Ok(Stmt::Ret(ret_val, start.combine(&end)))
     }
@@ -425,7 +433,7 @@ impl Parser {
         let vardef = self.parse_vardef()?;
         self.expect(
             TokenKind::Semi,
-            "Nach einer Variablendefinition haben wir ein Semicolon erwartet!",
+            "Wenn du eine Variable definieren willst musst du immer ein Semikolon(;) schreiben, wir wissen dann, wann die definition aufhört., Nach einer Variablendefinition haben wir ein Semicolon erwartet!",//torben
         )?;
         Ok(Stmt::VarDef(vardef))
     }
@@ -482,7 +490,7 @@ impl Parser {
         let start = self
             .expect(
                 TokenKind::Keyword(Keyword::Impl),
-                "An dieser Stelle haben wir das Impl Schluesselwort erwartet!",
+                "Hier haben wir eine Implementierung erwartet. Schau was hier Implementiert wird, und Implementiere da dann.An dieser Stelle haben wir das Impl Schluesselwort erwartet!",//torben
             )?
             .span;
 
@@ -490,7 +498,7 @@ impl Parser {
 
         self.expect(
             TokenKind::LBrace,
-            "An dieser Stelle haben wir eine oeffnende Klammer: `{` erwartet",
+            "Wir denken, dass du an dieser Stelle vergessen hast eine öffnende geschweifte Klamer ´{´ zu schreiben. An dieser Stelle haben wir eine oeffnende Klammer: `{` erwartet",//torben
         )?;
         let mut fn_decls = Vec::new();
         loop {
@@ -515,7 +523,7 @@ impl Parser {
         let end = self
             .expect(
                 TokenKind::RBrace,
-                "An dieser Stelle haben wir eine schliessende Klammer: `}` erwartet",
+                "Wir denken, dass du an dieser Stelle vergessen hast eine schließende geschweifte Klamer ´}´ zu schreiben. Wir denken An dieser Stelle haben wir eine schliessende Klammer: `}` erwartet",//torben
             )?
             .span;
         Ok(Decl::Impl {
@@ -917,7 +925,7 @@ impl Parser {
             };
         }
         let end = self
-            .expect(TokenKind::RBrace, "schlissende Klammer vergessen?")?
+            .expect(TokenKind::RBrace, "Wir denken du hast hier eine schließende Klammer `(` vergessen. schlissende Klammer vergessen?")?//torben
             .span;
         let span = path.span.combine(&end);
         let expr = Expr {
@@ -1071,9 +1079,9 @@ impl Parser {
     }
 
     fn parse_index(&mut self, callee: Expr) -> ParseResult<Expr> {
-        let start = self.expect(TokenKind::LBracket, "Feldindex")?.span;
+        let start = self.expect(TokenKind::LBracket, "Wenn du ein Feld erstellten willst, musst du ´[´ benutzen. Hier ist ´[´ der Feldindex! Feldindex")?.span; //torben
         let index = self.parse_expr()?;
-        let end = self.expect(TokenKind::RBracket, "] nach Feldindex")?.span;
+        let end = self.expect(TokenKind::RBracket, "Wenn du ein Feld erstellen willst, musst du ´]´ benutzen. Hier ist ´]´ der Feldindex! ] nach Feldindex")?.span; //torben
         let span = start.combine(&end);
         Ok(Expr {
             node: ExprKind::Index {
