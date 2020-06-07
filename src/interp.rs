@@ -303,10 +303,11 @@ impl Interp {
                     "Fehler im Typchecker. Index must be of type callee: array and index: num!"
                 ),
             },
-            ExprKind::Field(ref _callee, ref _field) => {
-                todo!();
-            }
-            ExprKind::This => todo!(),
+            ExprKind::Field(ref callee, ref field) => match self.eval(callee)? {
+                Value::Object(_, obj) => Ok(obj.get(&field.lexeme).unwrap().clone()),
+                _ => panic!("error in the typechecker!"),
+            },
+            ExprKind::This => Ok(self.cxt.get(&"selbst".to_string()).unwrap().clone()),
             ExprKind::Call {
                 ref callee,
                 ref args,
