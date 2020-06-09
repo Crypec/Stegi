@@ -17,6 +17,18 @@ pub enum ErrKind {
     Internal(String), // CodeRed this means we fucked something up, should never happen :D
 }
 
+impl fmt::Display for ErrKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ErrKind::Syntax(s_err) => write!(f, "{}", s_err),
+            ErrKind::Type(t_err) => write!(f, "{}", t_err),
+            ErrKind::Runtime(r_err) => write!(f, "{}", r_err),
+            ErrKind::Warning { desc, msg } => write!(f, "{} \n{}", desc, msg),
+            ErrKind::Internal(i_err) => write!(f, "{}", i_err),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SyntaxErr {
     // lexer
@@ -201,57 +213,55 @@ impl UserDiagnostic {
             + 1
     }
 
-    fn write_code_snippet(&self, _f: &mut fmt::Formatter, _c: Color) -> fmt::Result {
-        todo!();
-        // let line_str = format!(" {} |", self.line_num());
+    fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
+        let line_str = format!(" {} |", self.line_num());
 
-        // let align = line_str.len();
-        // let u_line = self.underline();
+        let align = line_str.len();
+        let u_line = self.underline();
 
-        // writeln!(f, "{:>a$}", "|", a = align)?;
-        // writeln!(f, "{} {}", line_str, self.span_snippet())?;
-        // writeln!(
-        //     f,
-        //     "{:>a$} {:>u$}",
-        //     "|",
-        //     u_line.color(c).bold(),
-        //     a = align,
-        //     u = self.span.lo - self.line_span().lo + u_line.len()
-        // )?;
-        // writeln!(
-        //     f,
-        //     "{:>a$} {}: {}",
-        //     "|",
-        //     "Hilfe".bold().underline(),
-        //     self.msg,
-        //     a = align
-        //)
+        writeln!(f, "{:>a$}", "|", a = align)?;
+        writeln!(f, "{} {}", line_str, self.span_snippet())?;
+        writeln!(
+            f,
+            "{:>a$} {:>u$}",
+            "|",
+            u_line.color(c).bold(),
+            a = align,
+            u = self.span.lo - self.line_span().lo + u_line.len()
+        )?;
+        writeln!(
+            f,
+            "{:>a$} {}: {}",
+            "|",
+            "Hilfe".bold().underline(),
+            self.kind,
+            a = align
+        )
     }
 }
 
 impl fmt::Display for UserDiagnostic {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        dbg!(self);
-        todo!()
-        // let color = match self.kind {
-        //     ErrKind::Warning { .. } => Color::Yellow,
-        //     ErrKind::Internal(_) => Color::BrightMagenta,
-        //     _ => Color::Red,
-        // };
-        // writeln!(
-        //     f,
-        //     "{} {} {}[{}]",
-        //     "--".bold(),
-        //     self.desc.color(color).bold(),
-        //     "------------------------------------------".bold(),
-        //     self.src_map.path.to_str().unwrap().blue()
-        // )?;
-        // writeln!(f)?;
-        // self.write_code_snippet(f, color)?;
-        // writeln!(f, "")?;
-        // for sug in &self.suggestions {
-        //     writeln!(f, " • {}", sug)?;
-        // }
-        // write!(f, "")
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let color = match self.kind {
+            ErrKind::Warning { .. } => Color::Yellow,
+            ErrKind::Internal(_) => Color::BrightMagenta,
+            _ => Color::Red,
+        };
+        let msg = format!("{}", self.kind).color(color).bold();
+        writeln!(
+            f,
+            "{} {} {}[{}]",
+            "--".bold(),
+            msg,
+            "------------------------------------------".bold(),
+            self.src_map.path.to_str().unwrap().blue()
+        )?;
+        writeln!(f)?;
+        self.write_code_snippet(f, color)?;
+        writeln!(f, "")?;
+        for sug in &self.suggestions {
+            writeln!(f, " • {}", sug)?;
+        }
+        write!(f, "")
     }
 }
