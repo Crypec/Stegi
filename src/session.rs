@@ -48,7 +48,7 @@ impl Driver {
             .map(Result::unwrap_err)
             .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
             .for_each(|diag| println!("{}", diag));
-        //TyConsGen::new().infer(&mut ast);
+        Typer::new().infer_types(&mut ast);
         Interp::new().interp(&mut ast);
 
         //dbg!(&ast);
