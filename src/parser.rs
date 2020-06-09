@@ -94,22 +94,22 @@ impl Parser {
         loop {
             if let Ok(tk) = self.peek_kind() {
                 match tk {
-                    TokenKind::Semi => {
-                        self.advance().unwrap();
-                        if let Ok(TokenKind::RBrace) = self.peek_kind() {
-                            self.advance().unwrap();
-                        }
-                        return;
-                    }
+                    // TokenKind::Semi => {
+                    //     self.advance().unwrap();
+                    //     if let Ok(TokenKind::RBrace) = self.peek_kind() {
+                    //         self.advance().unwrap();
+                    //     }
+                    //     return;
+                    // }
                     TokenKind::EOF => {
                         return;
                     }
                     TokenKind::Keyword(Keyword::Struct)
                     | TokenKind::Keyword(Keyword::Fun)
                     | TokenKind::Keyword(Keyword::For)
-                    | TokenKind::Keyword(Keyword::If)
-                    | TokenKind::Keyword(Keyword::While)
-                    | TokenKind::Keyword(Keyword::Return)
+                    // | TokenKind::Keyword(Keyword::If)
+                    // | TokenKind::Keyword(Keyword::While)
+                    // | TokenKind::Keyword(Keyword::Return)
                     | TokenKind::Keyword(Keyword::Impl) => return,
                     _ => self.advance().unwrap(),
                 };
@@ -1183,7 +1183,10 @@ impl Iterator for Parser {
         if self.has_next() {
             match self.parse() {
                 Ok(decl) => Some(Ok(decl)),
-                Err(err) => Some(Err(err)),
+                Err(err) => {
+                    self.sync_parser_state();
+                    Some(Err(err))
+                }
             }
         } else {
             None
