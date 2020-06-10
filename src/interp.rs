@@ -28,7 +28,7 @@ pub enum Value {
     Num(f64),
     Text(String),
     Bool(bool),
-    Object(Path, HashMap<String, Value>),
+    Object(Ident, HashMap<String, Value>),
     Tup(Vec<Value>),
     Array(Vec<Value>),
     Fn(FnDecl),
@@ -251,7 +251,7 @@ impl Interp {
                 }
             }
             ExprKind::Struct {
-                ref path,
+                ref name,
                 ref members,
             } => {
                 let mut obj = HashMap::new();
@@ -260,7 +260,7 @@ impl Interp {
                     let val = self.eval(&field.init.clone())?;
                     obj.insert(name, val);
                 }
-                Ok(Value::Object(path.clone(), obj))
+                Ok(Value::Object(name.clone(), obj))
             }
             ExprKind::Tup(ref elems) => {
                 // TODO(Simon): refactor this to use a nice iterator

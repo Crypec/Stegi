@@ -54,9 +54,9 @@ pub enum ExprKind {
 
     /// struct literals are used to initialize objects with values
     /// example: Person {name: "Torben"}
-    ///          ^-pat  ^^^^^^^^^^^^^^- member with name and init expr
+    ///          ^-name  ^^^^^^^^^^^^^^- member with name and init expr
     Struct {
-        path: Path,
+        name: Ident,
         members: Vec<Member>,
     },
 

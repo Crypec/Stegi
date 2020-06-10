@@ -903,7 +903,7 @@ impl Parser {
         })
     }
 
-    fn parse_struct_lit(&mut self, path: Path) -> ParseResult<Expr> {
+    fn parse_struct_lit(&mut self, name: Ident) -> ParseResult<Expr> {
         self.expect(TokenKind::LBrace, "Offene Klammer nach typenliteral")?;
 
         let mut members = Vec::new();
@@ -927,9 +927,9 @@ impl Parser {
         let end = self
             .expect(TokenKind::RBrace, "Wir denken du hast hier eine schließende Klammer `(` vergessen. schlissende Klammer vergessen?")?//torben
             .span;
-        let span = path.span.combine(&end);
+        let span = name.span.combine(&end);
         let expr = Expr {
-            node: ExprKind::Struct { path, members },
+            node: ExprKind::Struct { name, members },
             span,
             ty: Ty {
                 kind: TyKind::Infer,
@@ -970,7 +970,18 @@ impl Parser {
     fn parse_primary_ident(&mut self) -> ParseResult<Expr> {
         let pat = self.parse_path()?;
         match self.peek_kind()? {
-            TokenKind::LBrace => self.parse_struct_lit(pat),
+            TokenKind::LBrace => match pat.len() {
+                1 => self.parse_struct_lit(pat.first().unwrap().clone()),
+                _ => {
+                    let expected = vec![TokenKind::LBrace, TokenKind::PathSep];
+                    let err = ErrKind::Syntax(SyntaxErr::MissingToken {
+                        expected,
+                        actual: self.peek_kind()?,
+                    });
+                    let span = self.advance()?.span;
+                    Err(self.span_err(err, span))
+                }
+            },
             _ => {
                 let span = pat.span;
                 Ok(Expr {
