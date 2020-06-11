@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter::*;
 use std::vec::IntoIter;
@@ -227,7 +228,7 @@ impl Parser {
         Ok(FnSig {
             name,
             params,
-            ret_ty,
+            ret_ty: box ret_ty,
             span,
         })
     }

@@ -48,11 +48,11 @@ impl<K: Eq + Hash + Clone, V: Clone> Cxt<K, V> {
         self.global.insert(k, v);
     }
 
-    pub fn get<'a>(&'a mut self, k: &'a K) -> Option<&'a V> {
+    pub fn get<'a>(&'a self, k: &'a K) -> Option<V> {
         let val = self.stack.last().unwrap().get(&k);
         match val {
-            Some(_) => val,
-            None => self.global.get(&k),
+            Some(_) => val.cloned(),
+            None => self.global.get(&k).cloned(),
         }
     }
 

@@ -441,7 +441,7 @@ impl Field {
 pub struct FnSig {
     pub name: Ident,
     pub params: Vec<Param>,
-    pub ret_ty: Ty,
+    pub ret_ty: Box<Ty>,
     pub span: Span,
 }
 

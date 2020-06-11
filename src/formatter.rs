@@ -148,6 +148,18 @@ impl fmt::Display for VarDef {
     }
 }
 
+impl fmt::Display for FnSig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let params = self
+            .params
+            .iter()
+            .map(|p| p.name.lexeme.clone())
+            .collect::<Vec<String>>()
+            .join(",");
+        write!(f, "{}({}) -> {}", self.name.lexeme, params, self.ret_ty)
+    }
+}
+
 impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let p = self
