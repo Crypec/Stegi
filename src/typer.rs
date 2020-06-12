@@ -204,6 +204,67 @@ impl Typer {
         res
     }
 
+    fn unify(&mut self, lhs: &TyKind, rhs: &TyKind) {
+        match (lhs, rhs) {
+            (TyKind::Id(i), _) if self.subst(*i) != TyKind::Id(*i) => {
+                self.unify(&self.subst(*i), rhs)
+            }
+            (_, TyKind::Id(i)) if self.subst(*i) != TyKind::Id(*i) => {
+                self.unify(lhs, &self.subst(*i))
+            }
+            (TyKind::Id(i), _) => {
+                if self.occurs_in(*i, rhs) {
+                    let err = ErrKind::Type(TypeErr::InfRec(lhs.clone(), rhs.clone()));
+                    // FIXME(Simon): use ty instead of tykind to report errors properly
+                    self.span_err(err, Span { lo: 0, hi: 0 });
+                } else {
+                    self.subst[*i] = rhs.clone();
+                }
+            }
+            (_, TyKind::Id(i)) => {
+                if self.occurs_in(*i, lhs) {
+                    let err = ErrKind::Type(TypeErr::InfRec(lhs.clone(), rhs.clone()));
+                    // FIXME(Simon): use ty instead of tykind to report errors properly
+                    self.span_err(err, Span { lo: 0, hi: 0 });
+                } else {
+                    self.subst[*i] = lhs.clone();
+                }
+            }
+            (TyKind::Array(box lt), TyKind::Array(box rt)) => self.unify(&lt.kind, &rt.kind),
+            (TyKind::Tup(lt), TyKind::Tup(rt)) => {
+                if lt.len() != rt.len() {
+                    let err = ErrKind::Type(TypeErr::GenericsMismatch(lhs.clone(), rhs.clone()));
+                    self.span_err(err, Span { lo: 0, hi: 0 });
+                } else {
+                    lt.iter()
+                        .zip(rt.iter())
+                        .for_each(|(t1, t2)| self.unify(&t1.kind, &t2.kind));
+                }
+            }
+            _ => {
+                self.span_err(
+                    ErrKind::Type(TypeErr::InvalidType(lhs.clone(), rhs.clone())),
+                    Span { lo: 0, hi: 0 },
+                );
+            }
+        };
+    }
+
+    fn occurs_in(&self, index: usize, tk: &TyKind) -> bool {
+        match tk {
+            TyKind::Id(i) if self.subst(*i) != TyKind::Id(*i) => {
+                self.occurs_in(index, &self.subst(*i))
+            }
+            TyKind::Id(i) => *i == index,
+            TyKind::Tup(ref tup) => tup.iter().any(|elem| self.occurs_in(index, &elem.kind)),
+            _ => false,
+        }
+    }
+
+    fn subst(&self, i: usize) -> TyKind {
+        self.subst[i].clone()
+    }
+
     pub fn infer_types(&mut self, ast: &mut AST) {
         for d in ast.iter() {
             if let Decl::TyDecl(t) = d {
@@ -224,7 +285,17 @@ impl Typer {
             }
         }
         dbg!(&self.cons);
+        dbg!(&self.subst);
         dbg!(&self.diagnostics);
+        self.solve_constrains();
+        dbg!(&self.subst);
+    }
+
+    fn solve_constrains(&mut self) {
+        for con in self.cons.clone() {
+            let Constraint::Eq(t1, t2) = con;
+            self.unify(&t1, &t2);
+        }
     }
 
     fn infer_fn(&mut self, f: &mut FnDecl) -> Result<(), Diagnostic> {
@@ -369,7 +440,7 @@ impl Typer {
                 ref callee,
                 ref args,
             } => todo!(),
-            ExprKind::Intrinsic { ref kind, ref args } => todo!(),
+            ExprKind::Intrinsic { ref kind, ref args } => Ok(TyKind::Num),
             ExprKind::Field(ref callee, ref field) => todo!(),
             ExprKind::Val(ref val) => todo!(),
         }

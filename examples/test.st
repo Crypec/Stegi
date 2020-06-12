@@ -3,15 +3,12 @@ Typ Person {
 	alter: Zahl,
 }
 
+fun Start() {
 
-fun fib(x: Zahl) -> Zahl {
-	simon := Person {
-		  name: "test",
-		  alter: 19,
-	};
-	test := [20, 20, 20]
+	a := wahr
 	wenn a dann {
-
+		 #ausgabe("A ist wahr!")
 	}
-	test := a;
+
 }
+

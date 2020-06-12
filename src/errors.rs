@@ -77,26 +77,29 @@ impl fmt::Display for SyntaxErr {
 pub enum TypeErr {
     VarNotFound(String),
     TyNotFound(String),
-    InvalidType,
+    InvalidType(TyKind, TyKind),
     // TODO(Simon): this should really be a ty instead of just a tykind, we need the span to do proper error reporting
     InfRec(TyKind, TyKind),
     DuplicateLitField(String),
     MissingField(String),
     InvalidField(String, String),
     FieldNotFound { ty: Ty, field: String },
+    GenericsMismatch(TyKind, TyKind),
 }
 
 impl fmt::Display for TypeErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self{
             TypeErr:: VarNotFound(varname) => write!(f, "Diese Variable `{}` haben wir nicht gefunden. Bitte Definiere und Initialisiere sie, bevor du sie benutzt.", varname),
-            TypeErr::InvalidType => write!(f, "Du hast hier einen Typ benutzt der entweder gar nicht existiert oder hier nicht funktioniert. Bitte schau da nochmal drüber."),
+            TypeErr::InvalidType(expected, actual)=> write!(f, "Du hast hier einen Typ benutzt der entweder gar nicht existiert oder hier nicht funktioniert. Bitte schau da nochmal drüber. Erwartet: {} => Gefunden: {}", expected, actual),
             TypeErr::InfRec(a, b) => write!(f, "Unendlich rekursiver Typ entdeckt! Typ: {}, kommt in {} vor!!!", a, b),
             TypeErr::FieldNotFound{ty, field} => write!(f, "Der Datentyp {} hat kein Feld mit dem Namen {}!", ty, field),
 			TypeErr::TyNotFound(t) => write!(f, "Keine Defintion fuer den Datentyp {} gefunden", t),
 			TypeErr::DuplicateLitField(field) => write!(f, "Jedes Feld eines Objektes kann nur einmal vorkommen, '{}' kommt dabei allerdings mehr als einmal vor!", field),
 			TypeErr::MissingField(field) => write!(f, "Du hast vergessen dem Feld {} einen Wert zu geben!", field),
-			TypeErr::InvalidField(ty, field) => write!(f, "Der Datentyp: {} hat kein Feld mit dem Namen: {}!", ty, field)
+			TypeErr::InvalidField(ty, field) => write!(f, "Der Datentyp: {} hat kein Feld mit dem Namen: {}!", ty, field),
+			TypeErr::GenericsMismatch(lhs, rhs) => write!(f, "An dieser Stelle haben wir {} erwartet, aber {} gefunden!", lhs, rhs),
+
         } //torben
     }
 }
