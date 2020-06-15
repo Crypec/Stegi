@@ -4,6 +4,7 @@ use crate::errors::*;
 use crate::interp::*;
 use crate::typer::*;
 
+use std::collections::HashMap;
 use std::convert::TryFrom;
 
 use derivative::*;
@@ -23,8 +24,8 @@ pub trait Visitor {
     fn visit_expr(&mut self, expr: &mut Expr) -> Self::Result;
 }
 
-#[derive(Derivative)]
-#[derivative(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Derivative)]
+#[derivative(Debug, Clone)]
 pub enum ExprKind {
     /// normal binary expression, only used for numeric expressions
     /// example: a      +     42
@@ -164,7 +165,7 @@ impl Member {
 pub struct Struct {
     pub name: Ident,
 
-    pub fields: Vec<Field>,
+    pub fields: HashMap<Ident, Ty>,
     pub methods: Vec<FnDecl>,
 
     #[derivative(Debug = "ignore")]
@@ -182,10 +183,13 @@ pub struct Enum {
     pub span: Span,
 }
 
-#[derive(Clone, PartialEq, Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug)]
 pub enum TyDecl {
+    #[derivative(Debug = "transparent")]
     Struct(Struct),
+
+    #[derivative(Debug = "transparent")]
     Enum(Enum),
 }
 
@@ -217,10 +221,13 @@ pub struct FnDecl {
     pub span: Span,
 }
 
-#[derive(PartialEq, Clone, Derivative)]
+#[derive(Clone, Derivative)]
 #[derivative(Debug)]
 pub enum Decl {
+    #[derivative(Debug = "transparent")]
     TyDecl(TyDecl),
+
+    #[derivative(Debug = "transparent")]
     Fn(FnDecl),
     Impl {
         target: Path,
@@ -229,6 +236,12 @@ pub enum Decl {
         #[derivative(Debug = "ignore")]
         span: Span,
     },
+}
+
+impl ASTNode for Decl {
+    fn accept<V: Visitor>(&mut self, visitor: &mut V) -> V::Result {
+        visitor.visit_decl(self)
+    }
 }
 
 #[derive(Clone, PartialEq, Derivative)]
@@ -284,8 +297,8 @@ pub enum Stmt {
     Ret(Expr, Span),
 }
 
-#[derive(Clone, Derivative)]
-#[derivative(Debug, PartialEq)]
+#[derive(Clone, PartialEq, Derivative)]
+#[derivative(Debug)]
 pub struct VarDef {
     pub pat: Ident, // TODO(Simon): replace with proper pattern
     pub ty: Ty,
@@ -321,7 +334,7 @@ impl ASTNode for Stmt {
 }
 
 #[derive(Derivative)]
-#[derivative(Debug, PartialEq)]
+#[derivative(Debug)]
 pub struct EnumDecl {
     pub ident: Ident,
     pub variants: Vec<Variant>,
@@ -330,8 +343,8 @@ pub struct EnumDecl {
     pub span: Span,
 }
 
-#[derive(Clone, Derivative)]
-#[derivative(Debug, PartialEq)]
+#[derive(Clone, PartialEq, Derivative)]
+#[derivative(Debug)]
 pub struct Variant {
     pub ident: Ident,
     pub data: VariantData,
@@ -340,7 +353,7 @@ pub struct Variant {
     pub span: Span,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum VariantData {
     Val(Vec<Ty>),
     Unit,
@@ -369,8 +382,8 @@ impl Path {
     }
 }
 
-#[derive(Clone, Derivative)]
-#[derivative(Debug, PartialEq)]
+#[derive(Clone, PartialEq, Derivative)]
+#[derivative(Debug)]
 pub struct Param {
     pub name: Ident,
     pub ty: Ty,
@@ -391,7 +404,7 @@ impl Struct {
 }
 
 #[derive(Clone, Derivative)]
-#[derivative(Debug, PartialEq)]
+#[derivative(Debug)]
 pub struct Field {
     pub name: Ident,
     pub ty: Ty,
@@ -401,10 +414,12 @@ pub struct Field {
 }
 
 #[derive(Derivative)]
-#[derivative(Debug, PartialEq, Clone)]
+#[derivative(Debug, PartialEq, Hash, Clone)]
 pub struct Ident {
     pub lexeme: String,
 
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     #[derivative(Debug = "ignore")]
     pub span: Span,
 }
@@ -424,6 +439,8 @@ impl TryFrom<Token> for Ident {
     }
 }
 
+impl Eq for Ident {}
+
 impl Ident {
     pub fn new(name: String, span: Span) -> Self {
         Ident { lexeme: name, span }
@@ -436,8 +453,8 @@ impl Field {
     }
 }
 
-#[derive(Clone, Derivative)]
-#[derivative(Debug, PartialEq)]
+#[derive(Clone, PartialEq, Derivative)]
+#[derivative(Debug)]
 pub struct FnSig {
     pub name: Ident,
     pub params: Vec<Param>,
@@ -445,8 +462,8 @@ pub struct FnSig {
     pub span: Span,
 }
 
-#[derive(Clone, Derivative)]
-#[derivative(Debug, PartialEq)]
+#[derive(Clone, PartialEq, Derivative)]
+#[derivative(Debug)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
 
@@ -466,8 +483,8 @@ impl Default for ExprKind {
     }
 }
 
-#[derive(Derivative)]
-#[derivative(Debug, PartialEq, Clone)]
+#[derive(PartialEq, Derivative)]
+#[derivative(Debug, Clone)]
 pub struct Expr {
     pub node: ExprKind,
 
@@ -607,7 +624,7 @@ pub struct Call {
     pub args: Vec<Expr>,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Hash, Clone)]
 pub struct Span {
     pub lo: usize,
     pub hi: usize,
