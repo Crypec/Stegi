@@ -138,7 +138,6 @@ impl Interp {
 
     fn call_fn(&mut self, callee: &Expr, args: &Vec<Expr>) -> Result<Value, Diagnostic> {
         let callee = self.eval(callee)?;
-
         let mut args_eval = Vec::new();
         for arg in args {
             args_eval.push(self.eval(arg)?);
@@ -305,7 +304,7 @@ impl Interp {
             },
             ExprKind::Field(ref callee, ref field) => match self.eval(callee)? {
                 Value::Object(_, obj) => Ok(obj.get(&field.lexeme).unwrap().clone()),
-                _ => panic!("error in the typechecker!"),
+                _ => panic!("error in the typechecker! {}", callee),
             },
             ExprKind::This => Ok(self.cxt.get(&"selbst".to_string()).unwrap().clone()),
             ExprKind::Call {
