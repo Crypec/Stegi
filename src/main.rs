@@ -8,6 +8,7 @@ use std::path::PathBuf;
 #[macro_use]
 mod ast;
 
+mod cli;
 mod cxt;
 mod errors;
 mod formatter;
@@ -22,6 +23,8 @@ mod typer;
 extern crate failure;
 
 use self::session::*;
+
+use clap::*;
 
 const STEGI_ASCII: &str = r#"
  _________________________________________
@@ -54,6 +57,26 @@ fn main() {
 
     //let mut path = std::env::current_dir().expect("failed to get working dir");
     //path.push("examples/test.st");
+
+    // let matches = App::new("Stegi Kompiler")
+    //     .version("0.1")
+    //     .author("Torben Groetzinger, Simon Kunz, Leonie Zumsteg")
+    //     .about("Hier koennte ihre Werbung stehen")
+    //     .arg(
+    //         Arg::new("neu")
+    //             .short('n')
+    //             .long("neue")
+    //             .value_name("NAME")
+    //             .about("Erstellt ein neues Stegi Projekt")
+    //             .takes_value(true),
+    //     )
+    //     .arg(
+    //         Arg::new("start")
+    //             .short('s')
+    //             .long("starte")
+    //             .about("Startet das aktuelle Stegi Projekt"),
+    //     )
+    //     .get_matches();
     let path = PathBuf::from("examples/test.st");
     let mut d = Driver::new(vec![path]);
     d.compile();
