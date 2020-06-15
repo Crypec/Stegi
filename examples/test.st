@@ -3,12 +3,10 @@ Typ Person {
 	alter: Zahl,
 }
 
-fun Start() {
+fun Start(a: Bool) {
 
-	a := wahr
-	wenn a dann {
-		 #ausgabe("A ist wahr!")
-	}
-
+	simon := Person {
+		name: "Simon",
+		alter: 18,
+	};
 }
-

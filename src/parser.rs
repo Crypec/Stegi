@@ -540,7 +540,7 @@ impl Parser {
             .span;
         let name = self.parse_ident()?;
 
-        let mut fields = Vec::new();
+        let mut fields = HashMap::new();
 
         self.expect(TokenKind::LBrace, "Typenname")?;
 
@@ -550,7 +550,7 @@ impl Parser {
             let ty = self.parse_ty_specifier()?;
 
             let span = name.span.combine(&ty.span);
-            fields.push(Field::new(name, ty, span));
+            fields.insert(name, ty);
 
             match self.peek_kind()? {
                 TokenKind::RBrace => break,
