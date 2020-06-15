@@ -48,9 +48,8 @@ impl Driver {
             .map(Result::unwrap_err)
             .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
             .for_each(|diag| println!("{}", diag));
-        Typer::new().infer_types(&mut ast);
+        Typer::new().infer(&mut ast);
         Interp::new().interp(&mut ast);
-
         //dbg!(&ast);
         let had_err = self.sess.diagnostics.iter().any(|d| match d.kind {
             ErrKind::Runtime(_) | ErrKind::Syntax(_) | ErrKind::Type(_) | ErrKind::Internal(_) => {
