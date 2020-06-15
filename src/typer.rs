@@ -17,8 +17,8 @@ use crate::errors::Diagnostic;
 #[allow(dead_code)]
 const WORD_CMP_TRESHOLD: f32 = 0.2;
 
-#[derive(Derivative)]
-#[derivative(Debug, PartialEq, Clone)]
+#[derive(PartialEq, Derivative)]
+#[derivative(Debug, Clone)]
 pub struct Ty {
     pub kind: TyKind,
 
@@ -63,8 +63,8 @@ impl fmt::Debug for Constraint {
 #[allow(dead_code)]
 pub const DUMMY_TYPE_ID: usize = std::usize::MAX;
 
-#[derive(Derivative)]
-#[derivative(Debug, PartialEq, Clone)]
+#[derive(PartialEq, Derivative)]
+#[derivative(Debug, Clone)]
 pub enum TyKind {
     #[derivative(Debug = "transparent")]
     Array(Box<Ty>),
@@ -181,14 +181,31 @@ impl TyKind {
     }
 }
 
-pub struct Typer {
+pub struct Typer;
+
+impl Typer {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn infer(&self, ast: &mut AST) -> Vec<Diagnostic> {
+        let (subst, diags) = TyConsGenPass::new().gen(ast);
+        if !diags.is_empty() {
+            return diags;
+        }
+        TypeSubstitutor::new(subst).apply_subst(ast);
+        Vec::new()
+    }
+}
+
+pub struct TyConsGenPass {
     cxt: Cxt<String, TyKind>,
     subst: Vec<TyKind>,
     cons: Vec<Constraint>,
     diagnostics: Vec<Diagnostic>,
 }
 
-impl Typer {
+impl TyConsGenPass {
     pub fn new() -> Self {
         Self {
             cons: Vec::new(),
@@ -241,6 +258,9 @@ impl Typer {
                         .for_each(|(t1, t2)| self.unify(&t1.kind, &t2.kind));
                 }
             }
+            (TyKind::Bool, TyKind::Bool)
+            | (TyKind::Text, TyKind::Text)
+            | (TyKind::Num, TyKind::Num) => {}
             _ => {
                 self.span_err(
                     ErrKind::Type(TypeErr::InvalidType(lhs.clone(), rhs.clone())),
@@ -265,16 +285,20 @@ impl Typer {
         self.subst[i].clone()
     }
 
-    pub fn infer_types(&mut self, ast: &mut AST) {
-        for d in ast.iter() {
+    pub fn gen(&mut self, ast: &mut AST) -> (Vec<TyKind>, Vec<Diagnostic>) {
+        for d in ast.iter_mut() {
             if let Decl::TyDecl(t) = d {
                 match t {
-                    TyDecl::Struct(s) => self
-                        .cxt
-                        .insert_global(s.name.lexeme.clone(), TyKind::Struct(s.clone())),
-                    TyDecl::Enum(e) => self
-                        .cxt
-                        .insert_global(e.name.lexeme.clone(), TyKind::Enum(e.clone())),
+                    TyDecl::Struct(ref mut s) => {
+                        Self::infer_struct(s);
+                        self.cxt
+                            .insert_global(s.name.lexeme.clone(), TyKind::Struct(s.clone()));
+                    }
+                    TyDecl::Enum(e) => {
+                        Self::infer_enum(e);
+                        self.cxt
+                            .insert_global(e.name.lexeme.clone(), TyKind::Enum(e.clone()));
+                    }
                 }
             }
         }
@@ -284,11 +308,8 @@ impl Typer {
                 self.infer_fn(f);
             }
         }
-        dbg!(&self.cons);
-        dbg!(&self.subst);
-        dbg!(&self.diagnostics);
         self.solve_constrains();
-        dbg!(&self.subst);
+        (self.subst.clone(), self.diagnostics.clone())
     }
 
     fn solve_constrains(&mut self) {
@@ -300,10 +321,13 @@ impl Typer {
 
     fn infer_fn(&mut self, f: &mut FnDecl) -> Result<(), Diagnostic> {
         self.cxt.make_clean();
-        for p in f.header.params.iter() {
+        for p in f.header.params.iter_mut() {
             match p.ty.kind {
                 TyKind::Poly(_) => todo!(),
-                _ => self.cxt.insert(p.name.lexeme.clone(), p.ty.kind.clone()),
+                _ => {
+                    p.ty.infer_internal();
+                    self.cxt.insert(p.name.lexeme.clone(), p.ty.kind.clone());
+                }
             }
         }
         self.infer_block(&mut f.body)
@@ -461,28 +485,20 @@ impl Typer {
     ) -> Result<TyKind, Diagnostic> {
         let str_name = name.lexeme.clone();
 
-        match self.cxt.get(&str_name) {
+        match self.cxt.get(&str_name).clone() {
             Some(TyKind::Struct(s)) => {
                 // FIXME(Simon): this fails to detect if the user had more than 1 duplicate struct literal field!!!
                 Self::check_duplicates_field(&members)?;
                 self.check_forgotten_fields(&s, &members);
 
-                let member_table = s
-                    .fields
-                    .iter()
-                    .map(|field| (&field.name.lexeme, field.ty.kind.clone()))
-                    .collect::<HashMap<_, _>>();
-
                 for member in members {
                     let member_ty = self.infer(&member.init)?;
-                    match member_table.get(&member.name.lexeme) {
-                        Some(ty) => self
-                            .cons
-                            .push(Constraint::Eq(ty.clone(), member_ty.clone())),
-                        None => continue,
+                    if let Some(ty) = s.fields.get(&member.name) {
+                        self.cons
+                            .push(Constraint::Eq(ty.kind.clone(), member_ty.clone()))
                     }
                 }
-                Ok(TyKind::Struct(s.clone()))
+                Ok(TyKind::Struct(s))
             }
 
             _ => {
@@ -512,18 +528,16 @@ impl Typer {
     }
 
     fn check_forgotten_fields(&mut self, s: &Struct, members: &Vec<Member>) {
-        let mut member_table = s
-            .fields
-            .iter()
-            .map(|field| (&field.name.lexeme, field.span))
-            .collect::<HashMap<_, _>>();
-
+        let mut s = s.clone();
         for member in members {
-            let field = &member.name.lexeme;
-            match member_table.remove(field) {
+            let field = &member.name;
+            match s.fields.remove(field) {
                 None => {
                     self.span_err(
-                        ErrKind::Type(TypeErr::InvalidField(s.name.lexeme.clone(), field.clone())),
+                        ErrKind::Type(TypeErr::InvalidField(
+                            s.name.lexeme.clone(),
+                            field.lexeme.clone(),
+                        )),
                         member.span,
                     );
                 }
@@ -531,20 +545,47 @@ impl Typer {
             }
         }
 
-        for (name, span) in member_table {
-            let err = ErrKind::Type(TypeErr::MissingField(name.clone()));
-            self.span_err(err, span);
+        for (name, _) in s.fields {
+            let err = ErrKind::Type(TypeErr::MissingField(name.lexeme.clone()));
+            self.span_err(err, name.span);
         }
+    }
+
+    fn infer_struct(s: &mut Struct) {
+        for (_, ty) in &mut s.fields {
+            ty.infer_internal();
+        }
+    }
+    fn infer_enum(e: &mut Enum) {
+        for variant in &mut e.variants {
+            if let VariantData::Val(ref mut tup) = variant.data {
+                for elem in tup {
+                    elem.infer_internal();
+                }
+            }
+        }
+    }
+
+    fn link_cons(&mut self, e: &Expr) {
+        let tk = self.infer(&e).unwrap();
+        let id = self.new_id();
+        self.cons.push(Constraint::Eq(tk, id));
+    }
+
+    fn infer_expr(&mut self, e: &mut Expr) {
+        e.accept(self);
     }
 }
 
-impl Visitor for Typer {
+impl Visitor for TyConsGenPass {
     type Result = Result<(), Diagnostic>;
     fn visit_decl(&mut self, decl: &mut Decl) -> Self::Result {
-        match decl {
-            Decl::Fn(f) => self.infer_fn(f)?,
-            _ => {}
-        };
+        // match decl {
+        //     Decl::Fn(f) => self.infer_fn(f)?,
+        //     Decl::TyDecl(TyDecl::Struct(s)) => Self::infer_struct(s),
+        //     Decl::TyDecl(TyDecl::Enum(e)) => Self::infer_enum(e),
+        //     _ => {}
+        // };
         Ok(())
     }
     fn visit_stmt(&mut self, stmt: &mut Stmt) -> Self::Result {
@@ -556,57 +597,62 @@ impl Visitor for Typer {
                 };
                 vd.ty.kind = tk.clone();
                 self.cxt.insert(vd.pat.lexeme.clone(), tk.clone());
-                let init_ty = self.infer(&vd.init).unwrap();
-                self.cons.push(Constraint::Eq(init_ty, tk.clone()))
+                let init_ty = self.infer_expr(&mut vd.init);
+                self.cons
+                    .push(Constraint::Eq(vd.init.ty.kind.clone(), tk.clone()))
             }
             Stmt::Assign {
-                ref lhs,
-                ref rhs,
+                ref mut lhs,
+                ref mut rhs,
                 span: _,
             } => {
-                let lhs = self.infer(lhs).unwrap();
-                let rhs = self.infer(rhs).unwrap();
-                self.cons.push(Constraint::Eq(lhs, rhs))
+                self.infer_expr(lhs);
+                self.infer_expr(rhs);
+                self.cons
+                    .push(Constraint::Eq(lhs.ty.kind.clone(), rhs.ty.kind.clone()));
             }
             Stmt::Block(ref mut block) => self.infer_block(block)?,
-            Stmt::Expr(ref e) => {
-                self.infer(e)?;
-            }
+            Stmt::Expr(ref mut e) => self.infer_expr(e),
             Stmt::For {
-                ref vardef,
-                ref body,
+                ref mut vardef,
+                ref mut body,
                 span: _,
             } => {
                 // TODO(Simon): force array type
                 self.cxt.make();
                 let loop_var = vardef.pat.lexeme.clone();
-                let init_tk = self.infer(&vardef.init)?;
-                self.cxt.insert(vardef.pat.lexeme.clone(), init_tk);
+                self.infer_expr(&mut vardef.init);
+                self.cxt
+                    .insert(vardef.pat.lexeme.clone(), vardef.init.ty.kind.clone());
+                self.infer_block(body)?;
                 self.cxt.drop();
             }
             Stmt::While {
-                ref cond,
+                ref mut cond,
                 ref mut body,
                 span: _,
             } => {
-                let cond_ty = self.infer(cond)?;
-                self.cons.push(Constraint::Eq(TyKind::Bool, cond_ty));
+                self.infer_expr(cond);
+                self.cons
+                    .push(Constraint::Eq(TyKind::Bool, cond.ty.kind.clone()));
                 self.infer_block(body)?;
             }
             Stmt::If {
-                ref cond,
+                ref mut cond,
                 ref mut body,
                 ref mut else_branches,
                 ref mut final_branch,
                 span: _,
             } => {
-                let cond = self.infer(cond)?;
-                self.cons.push(Constraint::Eq(cond, TyKind::Bool));
+                self.infer_expr(cond);
+                self.cons
+                    .push(Constraint::Eq(cond.ty.kind.clone(), TyKind::Bool));
                 self.infer_block(body)?;
 
                 for branch in else_branches.iter_mut() {
-                    let cond = self.infer(&branch.cond)?;
-                    self.cons.push(Constraint::Eq(cond, TyKind::Bool));
+                    self.infer_expr(&mut branch.cond);
+                    self.cons
+                        .push(Constraint::Eq(branch.cond.ty.kind.clone(), TyKind::Bool));
                     self.infer_block(&mut branch.body)?;
                 }
                 if let Some(fb) = final_branch {
@@ -617,8 +663,266 @@ impl Visitor for Typer {
         };
         Ok(())
     }
+
     fn visit_expr(&mut self, expr: &mut Expr) -> Self::Result {
-        self.infer(&expr)?;
+        match expr.node {
+            ExprKind::Binary {
+                ref mut lhs,
+                op: _,
+                ref mut rhs,
+            } => {
+                self.infer_expr(lhs);
+                self.infer_expr(rhs);
+            }
+            ExprKind::Logical {
+                ref mut lhs,
+                op: _,
+                ref mut rhs,
+            } => {
+                self.infer_expr(lhs);
+                self.infer_expr(rhs);
+            }
+            ExprKind::Unary { ref mut rhs, .. } => {
+                self.infer_expr(rhs);
+            }
+            ExprKind::Index {
+                ref mut callee,
+                ref mut index,
+            } => {
+                self.infer_expr(callee);
+                self.infer_expr(index);
+            }
+            ExprKind::Array(ref mut elems) => {
+                for mut elem in elems {
+                    self.infer_expr(&mut elem);
+                }
+            }
+            ExprKind::Range(ref mut lo, ref mut hi) => {
+                self.infer_expr(lo);
+                self.infer_expr(hi);
+            }
+            ExprKind::Tup(ref mut elems) => {
+                for elem in elems {
+                    self.infer_expr(elem);
+                }
+            }
+            ExprKind::Field(ref mut callee, _) => self.infer_expr(callee),
+            ExprKind::Call {
+                ref mut callee,
+                ref mut args,
+            } => {
+                self.infer_expr(callee);
+                args.iter_mut().for_each(|elem| self.infer_expr(elem));
+            }
+            ExprKind::Intrinsic {
+                kind: _,
+                ref mut args,
+            } => args.iter_mut().for_each(|elem| self.infer_expr(elem)),
+            ExprKind::Struct {
+                name: _,
+                ref mut members,
+            } => {
+                for member in members {
+                    self.infer_expr(&mut member.init);
+                }
+            }
+            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This | ExprKind::Val(_) => {}
+        }
+
+        let tk = self.infer(&expr)?;
+        let id = self.new_id();
+        expr.ty.kind = id.clone();
+        self.cons.push(Constraint::Eq(tk, id));
         Ok(())
+    }
+}
+
+struct TypeSubstitutor {
+    substitutions: Vec<TyKind>,
+}
+
+impl TypeSubstitutor {
+    pub fn new(substitutions: Vec<TyKind>) -> Self {
+        Self { substitutions }
+    }
+
+    pub fn apply_subst(&mut self, ast: &mut AST) {
+        for decl in ast {
+            decl.accept(self);
+        }
+    }
+
+    pub fn subst(&self, t: &TyKind) -> TyKind {
+        match t {
+            TyKind::Id(i) if self.substitutions[*i] != TyKind::Id(*i) => {
+                self.subst(&self.substitutions[*i].clone())
+            }
+            TyKind::Tup(ref tup) => {
+                let mut subst_tup = Vec::new();
+                for elem in tup {
+                    subst_tup.push(Ty {
+                        kind: self.subst(&elem.kind),
+                        span: elem.span,
+                    });
+                }
+                TyKind::Tup(subst_tup)
+            }
+            TyKind::Array(ref elem) => TyKind::Array(box Ty {
+                kind: self.subst(&elem.kind),
+                span: elem.span,
+            }),
+            _ => t.clone(),
+        }
+    }
+
+    fn subst_fn(&mut self, f: &mut FnDecl) {
+        for param in f.header.params.iter_mut() {
+            param.ty.kind = self.subst(&param.ty.kind);
+        }
+        self.subst_block(&mut f.body);
+    }
+
+    fn subst_expr(&mut self, e: &mut Expr) {
+        e.accept(self);
+    }
+
+    fn subst_block(&mut self, b: &mut Block) {
+        for stmt in &mut b.stmts {
+            stmt.accept(self);
+        }
+    }
+}
+
+impl Visitor for TypeSubstitutor {
+    type Result = ();
+
+    fn visit_decl(&mut self, decl: &mut Decl) -> Self::Result {
+        if let Decl::Fn(f) = decl {
+            self.subst_fn(f);
+        }
+    }
+
+    fn visit_stmt(&mut self, stmt: &mut Stmt) -> Self::Result {
+        match stmt {
+            Stmt::While {
+                ref mut cond,
+                ref mut body,
+                ..
+            } => {
+                self.subst_expr(cond);
+                self.subst_block(body);
+            }
+            Stmt::VarDef(ref mut vd) => {
+                self.subst_expr(&mut vd.init);
+                vd.ty.kind = self.subst(&vd.ty.kind);
+            }
+            Stmt::Expr(ref mut e) => {
+                self.subst_expr(e);
+            }
+            Stmt::For {
+                ref mut vardef,
+                ref mut body,
+                ..
+            } => {
+                vardef.ty.kind = self.subst(&vardef.ty.kind);
+                self.subst_expr(&mut vardef.init);
+            }
+            Stmt::If {
+                ref mut cond,
+                ref mut body,
+                ref mut else_branches,
+                ref mut final_branch,
+                ..
+            } => {
+                self.subst_expr(cond);
+                self.subst_block(body);
+
+                for branch in else_branches {
+                    self.subst_expr(&mut branch.cond);
+                    self.subst_block(&mut branch.body);
+                }
+
+                if let Some(fb) = final_branch {
+                    self.subst_block(&mut fb.body);
+                }
+            }
+            Stmt::Assign {
+                ref mut lhs,
+                ref mut rhs,
+                ..
+            } => {
+                self.subst_expr(lhs);
+                self.subst_expr(rhs);
+            }
+            Stmt::Ret(ref mut val, _) => {
+                self.subst_expr(val);
+            }
+            Stmt::Break(_) | Stmt::Continue(_) => {}
+            Stmt::Block(ref mut block) => self.subst_block(block),
+        }
+    }
+    fn visit_expr(&mut self, expr: &mut Expr) -> Self::Result {
+        match expr.node {
+            ExprKind::Binary {
+                ref mut lhs,
+                op: _,
+                ref mut rhs,
+            } => {
+                self.subst_expr(lhs);
+                self.subst_expr(rhs);
+            }
+            ExprKind::Logical {
+                ref mut lhs,
+                op: _,
+                ref mut rhs,
+            } => {
+                self.subst_expr(lhs);
+                self.subst_expr(rhs);
+            }
+            ExprKind::Unary { ref mut rhs, .. } => {
+                self.subst_expr(rhs);
+            }
+            ExprKind::Index {
+                ref mut callee,
+                ref mut index,
+            } => {
+                self.subst_expr(callee);
+                self.subst_expr(index);
+            }
+            ExprKind::Array(ref mut elems) => {
+                for mut elem in elems {
+                    self.subst_expr(&mut elem);
+                }
+            }
+            ExprKind::Range(ref mut lo, ref mut hi) => {
+                self.subst_expr(lo);
+                self.subst_expr(hi);
+            }
+            ExprKind::Tup(ref mut elems) => {
+                for elem in elems {
+                    self.subst_expr(elem);
+                }
+            }
+            ExprKind::Field(ref mut callee, _) => self.subst_expr(callee),
+            ExprKind::Call {
+                ref mut callee,
+                ref mut args,
+            } => {
+                self.subst_expr(callee);
+                args.iter_mut().for_each(|elem| self.subst_expr(elem));
+            }
+            ExprKind::Intrinsic {
+                kind: _,
+                ref mut args,
+            } => args.iter_mut().for_each(|elem| self.subst_expr(elem)),
+            ExprKind::Struct {
+                name: _,
+                ref mut members,
+            } => members
+                .iter_mut()
+                .for_each(|member| self.subst_expr(&mut member.init)),
+            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This | ExprKind::Val(_) => {}
+        }
+        expr.ty.kind = self.subst(&expr.ty.kind);
     }
 }
