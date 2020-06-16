@@ -3,30 +3,19 @@ use crate::errors::*;
 use std::collections::HashMap;
 
 pub struct ImplReoderPass {
-    //ty_table: HashMap<&'a String, &'a Stmt>,
+    impls: HashMap<String, Vec<FnDecl>>,
     err: Vec<Diagnostic>,
 }
 
 impl<'a> ImplReoderPass {
     pub fn new() -> Self {
         Self {
-            //       ty_table: HashMap::new(),
+            impls: HashMap::new(),
             err: Vec::new(),
         }
     }
 
-    fn span_err(&mut self, kind: ErrKind, span: Span) {
-        self.err.push(Diagnostic {
-            kind,
-            span,
-            suggestions: Vec::new(),
-        });
-    }
-}
-
-pub fn reorder(ast: &mut AST) {
-    let mut impls = HashMap::new();
-    {
+    pub fn reorder(&mut self, ast: &mut AST) -> Vec<Diagnostic> {
         for stmt in ast.iter() {
             if let Decl::Impl {
                 ref target,
@@ -39,18 +28,24 @@ pub fn reorder(ast: &mut AST) {
                 // FIXME(Simon): To allow this we need to look at the whole path of the impl name, not just the first elem!
                 let name = target.first().unwrap().lexeme.clone();
                 let fns = fn_decls.clone();
-                impls.insert(name, fns);
+                self.impls.insert(name, fns);
             }
         }
         for stmt in ast.iter_mut() {
             if let Decl::TyDecl(t) = stmt {
-                if let Some(methods) = impls.remove(&t.name().lexeme) {
+                if let Some(methods) = self.impls.remove(&t.name().lexeme) {
                     t.add_methods(methods);
                 }
             }
         }
-        if !impls.is_empty() {
-            panic!("TODO(Simon): report error for invalid impls on unknown types");
-        }
+        self.err.clone()
+    }
+
+    fn span_err(&mut self, kind: ErrKind, span: Span) {
+        self.err.push(Diagnostic {
+            kind,
+            span,
+            suggestions: Vec::new(),
+        });
     }
 }

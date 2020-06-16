@@ -41,7 +41,7 @@ impl Driver {
         let mut ast: Vec<_> = ast.into_iter().map(Result::unwrap).collect();
         // FIXME(Simon): these should be converted into UserDiagnostics
 
-        reorder(&mut ast);
+        ImplReoderPass::new().reorder(&mut ast);
 
         errors
             .into_iter()
