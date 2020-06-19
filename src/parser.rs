@@ -439,21 +439,60 @@ impl Parser {
         Ok(Stmt::VarDef(vardef))
     }
 
+    fn parse_assing_kind(&mut self, callee: AssingKind) -> ParseResult<AssingKind> {
+        let mut callee = callee;
+        loop {
+            callee = match self.peek_kind()? {
+                //TokenKind::Ident(_) => AssignTarget::Var(self.parse_ident()?),
+                TokenKind::Dot => self.parse_assign_field(callee)?,
+                TokenKind::LBracket => self.parse_assign_index(callee)?,
+                _ => return Ok(callee),
+            }
+        }
+    }
+
+    fn parse_assign_field(&mut self, callee: AssingKind) -> ParseResult<AssingKind> {
+        self.expect(
+            TokenKind::Dot,
+            "An dieser Stelle haben wir ein Feld eines Strukturtypen erwartet!",
+        )?;
+        let name = self.parse_ident()?;
+        Ok(AssingKind::Field {
+            callee: box callee,
+            name,
+        })
+    }
+
+    fn parse_assign_index(&mut self, callee: AssingKind) -> ParseResult<AssingKind> {
+        self.expect(
+            TokenKind::LBracket,
+            "An dieser Stelle haben wir eine oeffnende Klammer erwartet!",
+        )?;
+        let index = self.parse_expr()?;
+        self.expect(
+            TokenKind::RBracket,
+            "An dieser Stelle haben wir eine schliessende Klammer erwartet!",
+        )?;
+        Ok(AssingKind::Index {
+            callee: box callee,
+            index,
+        })
+    }
+
+    fn parse_assing_target(&mut self) -> ParseResult<AssingTarget> {
+        let name = self.parse_ident()?;
+        let span = name.span.clone();
+        let kind = self.parse_assing_kind(AssingKind::Var(name))?;
+        Ok(AssingTarget { kind, span })
+    }
+
     fn parse_assign(&mut self) -> ParseResult<Stmt> {
-        let lhs = self.parse_expr()?;
+        let target = self.parse_assing_target()?;
         self.expect(TokenKind::Eq, "Gleichheitszeichen")?;
         let rhs = self.parse_expr()?;
-        let span = lhs.span.combine(&rhs.span);
         self.expect(TokenKind::Semi, "Semicolon")?;
-        match lhs.node {
-            ExprKind::Path(..) | ExprKind::Field(..) | ExprKind::Index { .. } | ExprKind::This => {
-                Ok(Stmt::Assign { lhs, rhs, span })
-            }
-            _ => Err(self.span_err(
-                ErrKind::Syntax(SyntaxErr::InvalidAssignmentTarget),
-                lhs.span,
-            )),
-        }
+        let span = target.span.combine(&rhs.span);
+        Ok(Stmt::Assign { target, rhs, span })
     }
 
     fn parse_expr_stmt(&mut self) -> ParseResult<Stmt> {

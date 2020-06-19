@@ -48,18 +48,12 @@ pub enum ExprKind {
     /// one sided expression
     /// example: -    3
     ///          ^-op ^-rhs
-    Unary {
-        rhs: Box<Expr>,
-        op: UnaryOp,
-    },
+    Unary { rhs: Box<Expr>, op: UnaryOp },
 
     /// struct literals are used to initialize objects with values
     /// example: Person {name: "Torben"}
     ///          ^-name  ^^^^^^^^^^^^^^- member with name and init expr
-    Struct {
-        name: Ident,
-        members: Vec<Member>,
-    },
+    Struct { name: Ident, members: Vec<Member> },
 
     /// a tuple expression is just a collection of other expressions
     /// example: (20,    20)
@@ -76,10 +70,7 @@ pub enum ExprKind {
     /// used to represent all sorts of index expressions
     /// example: foo[     expr     ]
     ///          ^-callee ^index
-    Index {
-        callee: Box<Expr>,
-        index: Box<Expr>,
-    },
+    Index { callee: Box<Expr>, index: Box<Expr> },
 
     /// array literals are used to initialize arrays with values
     /// example: [1, 2, 3, 4, 5]
@@ -117,20 +108,14 @@ pub enum ExprKind {
     This,
 
     /// refers to a live object or value, this basically represents an evaluated expression
-    Val(Value),
-
-    Intrinsic {
-        kind: Intrinsic,
-        args: Vec<Expr>,
-    },
+    // Val(Value),
+    //
+    Intrinsic { kind: Intrinsic, args: Vec<Expr> },
 
     /// function call e.g. foo(-42, 1, 1)
     /// example: foo    (-42,     10)
     ///          ^-callee ^-arg0  ^-arg1
-    Call {
-        callee: Box<Expr>,
-        args: Vec<Expr>,
-    },
+    Call { callee: Box<Expr>, args: Vec<Expr> },
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -208,8 +193,19 @@ impl TyDecl {
         }
     }
 
-    pub fn get_method(&self, name: &str) {
-        todo!();
+    pub fn get_method(&self, name: &str) -> Option<FnDecl> {
+        match self {
+            TyDecl::Struct(s) => s
+                .methods
+                .iter()
+                .find(|m| m.header.name.lexeme == name)
+                .cloned(),
+            TyDecl::Enum(e) => e
+                .methods
+                .iter()
+                .find(|m| m.header.name.lexeme == name)
+                .cloned(),
+        }
     }
 }
 
@@ -257,7 +253,7 @@ pub enum Stmt {
     /// example: a.b    = 20
     ///          ^-callee ^value
     Assign {
-        lhs: Expr,
+        target: AssingTarget,
         rhs: Expr,
         span: Span,
     },
@@ -306,6 +302,45 @@ pub struct VarDef {
 
     #[derivative(Debug = "ignore")]
     pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum AssingKind {
+    /// This is our base case.
+    Var(Ident),
+
+    Field {
+        callee: Box<AssingKind>,
+        name: Ident,
+    },
+
+    Index {
+        callee: Box<AssingKind>,
+        index: Expr,
+    },
+}
+
+impl AssingKind {
+    pub fn base_var(&self) -> Ident {
+        match self {
+            AssingKind::Var(var) => var.clone(),
+            AssingKind::Field { callee, .. } | AssingKind::Index { callee, .. } => {
+                callee.base_var()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssingTarget {
+    pub kind: AssingKind,
+    pub span: Span,
+}
+
+impl AssingTarget {
+    pub fn name(&self) -> Ident {
+        self.kind.base_var()
+    }
 }
 
 #[derive(Clone, Derivative)]

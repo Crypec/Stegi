@@ -7,7 +7,11 @@ use std::fmt;
 impl fmt::Display for Stmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Stmt::Assign { lhs, rhs, span: _ } => writeln!(f, "{} = {}", lhs, rhs),
+            Stmt::Assign {
+                target,
+                rhs,
+                span: _,
+            } => writeln!(f, "{} = {}", target, rhs),
             Stmt::Block(b) => writeln!(f, "{}", b),
             Stmt::Break(_) => writeln!(f, "stop;"),
             Stmt::Continue(_) => writeln!(f, "weiter;"),
@@ -169,5 +173,21 @@ impl fmt::Display for Path {
             .collect::<Vec<String>>()
             .join("::");
         write!(f, "{}", p)
+    }
+}
+
+impl fmt::Display for AssingKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AssingKind::Var(name) => write!(f, "{}", name),
+            AssingKind::Field { callee, name } => write!(f, "{}.{}", callee, name),
+            AssingKind::Index { callee, index } => write!(f, "{}[{}]", callee, index),
+        }
+    }
+}
+
+impl fmt::Display for AssingTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)
     }
 }
