@@ -49,3 +49,29 @@ impl<'a> ImplReoderPass {
         });
     }
 }
+
+// pub struct MethodReorderingPass {
+//     ty_table: HashMap<String, TyDecl>,
+//     err: Vec<Diagnostic>,
+// }
+
+// impl MethodReorderingPass {
+//     fn new() -> Self {
+//         Self {
+//             ty_table: HashMap::new(),
+//             err: Vec::new(),
+//         }
+//     }
+
+//     pub fn reorder(&mut self, ast: &mut AST) -> Vec<Diagnostic> {
+//         todo!();
+//     }
+
+//     pub fn fill_ty_table(&mut self, ast: &AST) {
+//         for node in ast {
+//             if let Decl::TyDecl(t) = node {
+//                 self.ty_table.insert(t.name().lexeme, t.clone());
+//             }
+//         }
+//     }
+// }

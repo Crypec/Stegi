@@ -1,5 +1,6 @@
 use crate::ast::*;
 
+use std::cell::RefCell;
 use std::convert::From;
 use std::fmt;
 
@@ -15,7 +16,7 @@ macro_rules! cast(
         match $val {
             $p(x) => x,
             _ => {
-                let pat = stringify!($pat);
+                let pat = stringify!(p);
                 let val = stringify!($val);
                 panic!("Invalide Umwandlung, {:#?} entspricht nicht folgendem Muster: {:#?} dies ist wahrscheinlich ein Fehler im Typenchecker!", val, pat);
             }
@@ -23,12 +24,14 @@ macro_rules! cast(
     }
 );
 
+type Object = (Ident, HashMap<String, Value>);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Num(f64),
     Text(String),
     Bool(bool),
-    Object(Ident, HashMap<String, Value>),
+    Object(Object),
     Tup(Vec<Value>),
     Array(Vec<Value>),
     Fn(FnDecl),
@@ -62,7 +65,7 @@ impl fmt::Display for Value {
                     .join(", ");
                 write!(f, "({})", values)
             }
-            Value::Object(path, obj) => write!(f, "{}: {:#?}", path, obj),
+            Value::Object((path, obj)) => write!(f, "{}: {:#?}", path, obj),
             Value::Fn(fun) => write!(f, "{:#?}", fun),
         }
     }
@@ -124,206 +127,42 @@ impl Interp {
     }
 
     fn run_block(&mut self, block: &mut Block) -> Result<Option<Value>, Diagnostic> {
-        self.cxt.make();
+        self.cxt.push_scope();
         for stmt in block.stmts.iter_mut() {
             let ret = stmt.accept(self)?;
             if let Some(_) = ret {
-                self.cxt.drop();
+                self.cxt.pop_scope();
                 return Ok(ret);
             }
         }
-        self.cxt.drop();
+        self.cxt.pop_scope();
         Ok(None)
     }
 
-    fn call_fn(&mut self, callee: &Expr, args: &Vec<Expr>) -> Result<Value, Diagnostic> {
-        let callee = self.eval(callee)?;
-        let mut args_eval = Vec::new();
-        for arg in args {
-            args_eval.push(self.eval(arg)?);
+    fn call_fn(&mut self, callee: &mut Expr, args: &Vec<Expr>) -> Result<Value, Diagnostic> {
+        let mut args = args.clone();
+        if let ExprKind::Field(..) = callee.node {
+            args.push(callee.clone());
         }
+
+        let callee = self.eval(callee)?;
         let mut fun = cast!(callee, Value::Fn);
-        let params = fun.header.params;
-        debug_assert_eq!(args_eval.len(), params.len());
+        let mut params = fun.header.params;
+        debug_assert_eq!(args.len(), params.len());
 
         // FIXME(Simon): this needs to be a call to make_clean()!!!
-        self.cxt.make();
+        self.cxt.push_scope();
 
-        for (p, a) in params.iter().zip(args_eval.into_iter()) {
+        for (p, a) in params.iter_mut().zip(args.iter()) {
             let name = p.name.lexeme.clone();
-            self.cxt.insert(name, a);
+            let arg = self.eval(&a)?;
+            self.cxt.insert(name, arg);
         }
         let ret = self.run_block(&mut fun.body)?;
-        self.cxt.drop();
+        self.cxt.pop_scope();
         match ret {
             Some(val) => Ok(val),
             None => Ok(Value::Tup(Vec::new())),
-        }
-    }
-
-    pub fn eval(&mut self, e: &Expr) -> Result<Value, Diagnostic> {
-        match e.node {
-            ExprKind::Binary {
-                ref lhs,
-                ref op,
-                ref rhs,
-            } => {
-                let lhs = self.eval(lhs)?;
-                let rhs = self.eval(rhs)?;
-                match (lhs, rhs) {
-                    // TODO(Simon): check for overflows etc...
-                    (Value::Num(a), Value::Num(b)) => match op {
-                        BinaryOp::Plus => Ok(Value::Num(a + b)),
-                        BinaryOp::Minus => Ok(Value::Num(a - b)),
-                        BinaryOp::Multiply => Ok(Value::Num(a * b)),
-                        BinaryOp::Divide => Ok(Value::Num(a / b)),
-                    },
-                    _ => panic!("error in typechecker: Invalid type for binary op!"),
-                }
-            }
-            ExprKind::Logical {
-                ref lhs,
-                ref op,
-                ref rhs,
-            } => {
-                let lhs = self.eval(lhs)?;
-                let rhs = self.eval(rhs)?;
-                match op {
-                    CmpOp::EqEq => Ok(Value::Bool(lhs == rhs)),
-                    CmpOp::NotEq => Ok(Value::Bool(lhs != rhs)),
-                    CmpOp::Greater => match (lhs, rhs) {
-                        (Value::Num(a), Value::Num(b)) => Ok(Value::Bool(a > b)),
-                        _ => panic!("error in typechecker: Invalid type for cmpop: >"),
-                    },
-                    CmpOp::GreaterEq => match (lhs, rhs) {
-                        (Value::Num(a), Value::Num(b)) => Ok(Value::Bool(a >= b)),
-                        _ => panic!("error in typechecker: Invalid type for cmpop: >="),
-                    },
-                    CmpOp::Less => match (lhs, rhs) {
-                        (Value::Num(a), Value::Num(b)) => Ok(Value::Bool(a < b)),
-                        _ => panic!("error in typechecker: Invalid type for cmpop: <"),
-                    },
-                    CmpOp::LessEq => match (lhs, rhs) {
-                        (Value::Num(a), Value::Num(b)) => Ok(Value::Bool(a <= b)),
-                        _ => panic!("error in typechecker: Invalid type for cmpop: <="),
-                    },
-                    CmpOp::And => match (lhs, rhs) {
-                        (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(a && b)),
-                        _ => panic!("error in typechecker: Invalid type for cmpop: and"),
-                    },
-                    CmpOp::Or => match (lhs, rhs) {
-                        (Value::Bool(a), Value::Bool(b)) => Ok(Value::Bool(a || b)),
-                        _ => panic!("error in typechecker: Invalid type for cmpop: or"),
-                    },
-                }
-            }
-            ExprKind::Unary { ref rhs, ref op } => match op {
-                UnaryOp::Minus => {
-                    if let Value::Num(n) = self.eval(rhs)? {
-                        return Ok(Value::Num(-1.0 * n));
-                    } else {
-                        panic!("error in typechecker: Invalid type for unary: -");
-                    }
-                }
-                UnaryOp::Not => {
-                    if let Value::Bool(b) = self.eval(rhs)? {
-                        return Ok(Value::Bool(!b));
-                    } else {
-                        panic!("error in typechecker: Invalid type for unary: !");
-                    }
-                }
-            },
-            // NOTE(Simon): this clone may be unecessary if we decide to mutate the ast on the fly
-            ExprKind::Lit(ref l) => Ok(l.clone().into()),
-            ExprKind::Path(ref p) => {
-                if p.len() > 1 {
-                    // TODO(Simon): lookup method in typdecl in ty_table
-                    todo!()
-                } else {
-                    let name = &p.first().unwrap().lexeme;
-                    debug_assert!(
-                        self.cxt.get(&name).is_some(),
-                        "Fehlende Variablen sollten eigentlich vom Typchecker erkannt werden!"
-                    );
-                    // FIXME(Simon): as always: we don't really need this clone
-                    Ok(self.cxt.get(&name).unwrap().clone())
-                }
-            }
-            ExprKind::Struct {
-                ref name,
-                ref members,
-            } => {
-                let mut obj = HashMap::new();
-                for field in members.iter() {
-                    let name = field.name.lexeme.clone();
-                    let val = self.eval(&field.init.clone())?;
-                    obj.insert(name, val);
-                }
-                Ok(Value::Object(name.clone(), obj))
-            }
-            ExprKind::Tup(ref elems) => {
-                // TODO(Simon): refactor this to use a nice iterator
-                let mut t = Vec::new();
-                for e in elems {
-                    t.push(self.eval(&e)?);
-                }
-                Ok(Value::Tup(t))
-            }
-            ExprKind::Array(ref arr) => {
-                // TODO(Simon): refactor this to use a nice iterator
-                let mut a = Vec::new();
-                for e in arr {
-                    a.push(self.eval(&e)?);
-                }
-                Ok(Value::Array(a))
-            }
-            ExprKind::Range(ref start, ref end) => {
-                let (start, end) = match (self.eval(start)?, self.eval(end)?) {
-					(Value::Num(start), Value::Num(end)) => (start, end),
-					_ => panic!("Start und Endwert einer Reihe muessen immer den Typ Zahl haben. Es scheint als haetten wir einen Fehler im Typchecker!")
-				};
-                // FIXME(Simon): this is unsound because a f64::MAX can be bigger than i64::MAX
-                let (start, end) = (start as i64, end as i64);
-                let range = (start..end).map(|i| Value::Num(i as f64)).collect();
-                Ok(Value::Array(range))
-            }
-            ExprKind::Index {
-                ref callee,
-                ref index,
-            } => match (self.eval(callee)?, self.eval(index)?) {
-                (Value::Array(arr), Value::Num(i)) => {
-                    let i = i.trunc() as usize;
-                    match arr.get(i) {
-                        Some(v) => Ok(v.clone()),
-                        None => panic!("index out of bounds!"),
-                    }
-                }
-                _ => panic!(
-                    "Fehler im Typchecker. Index must be of type callee: array and index: num!"
-                ),
-            },
-            ExprKind::Field(ref callee, ref field) => match self.eval(callee)? {
-                Value::Object(_, obj) => Ok(obj.get(&field.lexeme).unwrap().clone()),
-                _ => panic!("error in the typechecker! {}", callee),
-            },
-            ExprKind::This => Ok(self.cxt.get(&"selbst".to_string()).unwrap().clone()),
-            ExprKind::Call {
-                ref callee,
-                ref args,
-            } => self.call_fn(&callee, &args),
-            ExprKind::Val(ref v) => Ok(v.clone()),
-            ExprKind::Intrinsic { ref kind, ref args } => match kind {
-                Intrinsic::Print => {
-                    //let fmt = cast!(self.eval(args.get(0).unwrap())?, Value::Text);
-                    let mut args_eval = Vec::new();
-                    for arg in args {
-                        args_eval.push(self.eval(arg)?);
-                    }
-                    println!("{}", args_eval[0]);
-                    Ok(Value::Num(0.0))
-                }
-                _ => todo!(),
-            },
         }
     }
 
@@ -354,7 +193,7 @@ impl Interp {
                 // TODO(Simon): we could clean this up a bit
                 // let found_main = false;
                 if f.header.name.lexeme == "Start" {
-                    self.run_block(&mut f.body);
+                    self.run_block(&mut f.body).unwrap();
                 }
                 // if !found_main {
                 //     self.span
@@ -362,9 +201,188 @@ impl Interp {
             }
         }
     }
+
+    fn assign(&mut self, target: &AssingKind, to: Value) -> Result<(), Diagnostic> {
+        let from = self
+            .cxt
+            .get(&target.base_var().lexeme)
+            .expect("Variable nicht definiert! Das ist vermutlich ein Fehler im Typenchecker!");
+        let ptr = self.assign_match(target)?;
+        *ptr = to;
+        Ok(())
+    }
+
+    fn assign_match(&mut self, target: &AssingKind) -> Result<&mut Value, Diagnostic> {
+        match target {
+            AssingKind::Var(var) => Ok(self.cxt.get_mut(&var.lexeme).expect(
+                "Variable nicht gefunden! Vermutlich ein Fehler waehrend der Typenanalyse!",
+            )),
+            AssingKind::Field { callee, name } => {
+                if let Value::Object((_, obj)) = self.assign_match(callee)? {
+                    Ok(obj.get_mut(&name.lexeme).expect(
+                        "Feld in Objekt nicht gefunden! Vermutlich ein Fehler in der Typenanalyse!",
+                    ))
+                } else {
+                    Err(Diagnostic {
+						kind: ErrKind::Internal("Feld in Object nicht gefunden! Dieser Fehler haette eigentlich waehrend der Typenanalyse erkannt werden sollen!".to_string()),
+						span: name.span,
+						suggestions: Vec::new(),
+					})
+                }
+            }
+            AssingKind::Index { callee, index } => {
+                let idx = cast!(self.eval(&index)?, Value::Num) as isize;
+                if let Value::Array(arr) = self.assign_match(callee)? {
+                    let err = Diagnostic {
+                        kind: ErrKind::Runtime(RuntimeError::OutOfBounds {
+                            index: idx,
+                            len: arr.len(),
+                        }),
+                        span: index.span,
+                        suggestions: Vec::new(),
+                    };
+                    arr.get_mut(idx as usize).ok_or(err)
+                } else {
+                    Err(Diagnostic {
+						kind: ErrKind::Internal("Objekt ist kein Array. Dieser Fehler sollte eigentlich waehrend der Typenanalyse erkannt werden!".to_string()),
+						span: index.span,
+						suggestions: Vec::new(),
+					})
+                }
+            }
+        }
+    }
+
+    fn eval(&self, e: &Expr) -> Result<Value, Diagnostic> {
+        match e.node {
+            ExprKind::Binary {
+                ref lhs,
+                ref op,
+                ref rhs,
+            } => {
+                let lhs = cast!(self.eval(lhs)?, Value::Num);
+                let rhs = cast!(self.eval(rhs)?, Value::Num);
+                let res = match op {
+                    BinaryOp::Plus => lhs + rhs,
+                    BinaryOp::Minus => lhs - rhs,
+                    BinaryOp::Multiply => lhs * rhs,
+                    BinaryOp::Divide => lhs / rhs, // TODO(Simon): propper error reporting
+                };
+                Ok(Value::Num(res))
+            }
+            ExprKind::Logical {
+                ref lhs,
+                ref op,
+                ref rhs,
+            } => {
+                let lhs = cast!(self.eval(lhs)?, Value::Bool);
+                let rhs = cast!(self.eval(rhs)?, Value::Bool);
+                let res = match op {
+                    CmpOp::And => lhs && rhs,
+                    CmpOp::Or => lhs || rhs,
+                    CmpOp::NotEq => lhs != rhs,
+                    CmpOp::EqEq => lhs == rhs, // TODO(Simon): propper error reporting
+                    CmpOp::GreaterEq => lhs >= rhs,
+                    CmpOp::Greater => lhs > rhs,
+                    CmpOp::Less => lhs < rhs,
+                    CmpOp::LessEq => lhs <= rhs,
+                };
+                Ok(Value::Bool(res))
+            }
+            ExprKind::Unary { ref rhs, ref op } => match op {
+                UnaryOp::Minus => {
+                    let rhs = cast!(self.eval(&rhs)?, Value::Num);
+                    Ok(Value::Num(-rhs))
+                }
+                UnaryOp::Not => {
+                    let rhs = cast!(self.eval(&rhs)?, Value::Bool);
+                    Ok(Value::Bool(!rhs))
+                }
+            },
+            ExprKind::Range(ref from, ref to) => {
+                let from = cast!(self.eval(from)?, Value::Num) as isize;
+                let to = cast!(self.eval(to)?, Value::Num) as isize;
+                let arr = (from..to).map(|e| Value::Num(e as f64)).collect();
+                Ok(Value::Array(arr))
+            }
+            ExprKind::This => Ok(self
+                .cxt
+                .get(&"selbst".to_string())
+                .expect("Failed to find ref to this!")
+                .clone()),
+            ExprKind::Tup(ref elems) => {
+                let mut t = Vec::new();
+                for elem in elems {
+                    t.push(self.eval(&elem)?);
+                }
+                Ok(Value::Tup(t))
+            }
+            ExprKind::Index {
+                ref callee,
+                ref index,
+            } => {
+                let arr = cast!(self.eval(callee)?, Value::Array);
+                let idx = cast!(self.eval(index)?, Value::Num) as isize;
+                match arr.get(idx as usize) {
+                    Some(val) => Ok(val.clone()),
+                    None => {
+                        let kind = ErrKind::Runtime(RuntimeError::OutOfBounds {
+                            len: arr.len(),
+                            index: idx,
+                        });
+                        return Err(Diagnostic{
+							kind,
+							span: e.span,
+							suggestions: vec!["Du kannst versuchen mit einer extra Abfrage den Wert des index zu ueberpruefen!".to_string()],
+						});
+                    }
+                }
+            }
+            ExprKind::Lit(ref lit) => match lit {
+                Lit::Bool(b) => Ok(Value::Bool(*b)),
+                Lit::Number(n) => Ok(Value::Num(*n)),
+                Lit::String(t) => Ok(Value::Text(t.clone())),
+            },
+            ExprKind::Struct {
+                ref name,
+                ref members,
+            } => {
+                let mut obj = HashMap::new();
+                for m in members {
+                    obj.insert(m.name.lexeme.clone(), self.eval(&m.init)?);
+                }
+                Ok(Value::Object((name.clone(), obj)))
+            }
+            ExprKind::Field(ref callee, ref name) => {
+                let (_, obj) = cast!(self.eval(&callee)?, Value::Object);
+                Ok(obj.get(&name.lexeme).expect("Field not found!").clone())
+            }
+            ExprKind::Path(ref p) => Ok(self.cxt.get(&p.first().unwrap().lexeme).unwrap().clone()),
+            ExprKind::Array(ref elems) => {
+                let mut array = Vec::new();
+                for e in elems {
+                    array.push(self.eval(&e)?);
+                }
+                Ok(Value::Array(array))
+            }
+            ExprKind::Call {
+                ref callee,
+                ref args,
+            } => {
+                todo!();
+            }
+            ExprKind::Intrinsic { ref kind, ref args } => match kind {
+                Intrinsic::Print => {
+                    println!("{:#?}", self.eval(args.first().unwrap()));
+                    Ok(Value::Tup(Vec::new()))
+                }
+                _ => todo!(),
+            },
+        }
+    }
 }
 
-impl Visitor for Interp {
+impl<'a> Visitor for Interp {
     type Result = Result<Option<Value>, Diagnostic>;
 
     fn visit_decl(&mut self, d: &mut Decl) -> Self::Result {
@@ -372,7 +390,7 @@ impl Visitor for Interp {
     }
 
     fn visit_expr(&mut self, e: &mut Expr) -> Self::Result {
-        Ok(Some(self.eval(e)?))
+        todo!()
     }
 
     fn visit_stmt(&mut self, s: &mut Stmt) -> Self::Result {
@@ -416,7 +434,7 @@ impl Visitor for Interp {
                 ref mut body,
                 ref span,
             } => {
-                self.cxt.make();
+                self.cxt.push_scope();
                 let val = self.eval(&vardef.init)?;
                 let loop_var = vardef.pat.lexeme.clone();
                 let arr = match val {
@@ -427,11 +445,11 @@ impl Visitor for Interp {
                     self.cxt.insert(loop_var.clone(), elem);
                     let ret = self.run_block(body)?;
                     if let Some(_) = ret {
-                        self.cxt.drop();
+                        self.cxt.pop_scope();
                         return Ok(ret);
                     }
                 }
-                self.cxt.drop();
+                self.cxt.pop_scope();
                 Ok(None)
             }
             Stmt::Expr(ref e) => {
@@ -452,24 +470,18 @@ impl Visitor for Interp {
                 Ok(None)
             }
             Stmt::Assign {
-                ref lhs,
+                ref target,
                 ref rhs,
                 ref span,
             } => {
-                println!("bevor eval");
-                dbg!(lhs);
-                dbg!(rhs);
-                let lhs = self.eval(lhs)?;
                 let rhs = self.eval(rhs)?;
-
-                println!("after eval");
-                dbg!(lhs);
-                dbg!(rhs);
-                todo!();
+                self.assign(&target.kind, rhs)?;
+                Ok(None)
             }
             Stmt::Block(ref mut block) => Ok(self.run_block(block)?),
             Stmt::Break(_) | Stmt::Continue(_) => todo!(),
-            Stmt::Ret(ref e, _) => Ok(Some(self.eval(e)?)),
+            _ => todo!(),
+            //Stmt::Ret(ref e, _) => Ok(Some(self.eval(e)?)),
         }
     }
 }

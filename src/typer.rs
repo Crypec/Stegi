@@ -305,7 +305,7 @@ impl TyConsGenPass {
 
         for d in ast.iter_mut() {
             if let Decl::Fn(f) = d {
-                self.infer_fn(f);
+                self.infer_fn(f).unwrap();
             }
         }
         self.solve_constrains();
@@ -320,7 +320,7 @@ impl TyConsGenPass {
     }
 
     fn infer_fn(&mut self, f: &mut FnDecl) -> Result<(), Diagnostic> {
-        self.cxt.make_clean();
+        self.cxt.push_frame();
         for p in f.header.params.iter_mut() {
             match p.ty.kind {
                 TyKind::Poly(_) => todo!(),
@@ -334,11 +334,11 @@ impl TyConsGenPass {
     }
 
     fn infer_block(&mut self, block: &mut Block) -> Result<(), Diagnostic> {
-        self.cxt.make();
+        self.cxt.push_scope();
         for stmt in block.stmts.iter_mut() {
             stmt.accept(self)?;
         }
-        self.cxt.drop();
+        self.cxt.pop_scope();
         Ok(())
     }
 
@@ -466,7 +466,7 @@ impl TyConsGenPass {
             } => todo!(),
             ExprKind::Intrinsic { ref kind, ref args } => Ok(TyKind::Num),
             ExprKind::Field(ref callee, ref field) => todo!(),
-            ExprKind::Val(ref val) => todo!(),
+            //ExprKind::Val(ref val) => todo!(),
         }
     }
 
@@ -485,7 +485,7 @@ impl TyConsGenPass {
     ) -> Result<TyKind, Diagnostic> {
         let str_name = name.lexeme.clone();
 
-        match self.cxt.get(&str_name).clone() {
+        match self.cxt.get(&str_name).cloned() {
             Some(TyKind::Struct(s)) => {
                 // FIXME(Simon): this fails to detect if the user had more than 1 duplicate struct literal field!!!
                 Self::check_duplicates_field(&members)?;
@@ -602,14 +602,14 @@ impl Visitor for TyConsGenPass {
                     .push(Constraint::Eq(vd.init.ty.kind.clone(), tk.clone()))
             }
             Stmt::Assign {
-                ref mut lhs,
+                ref mut target,
                 ref mut rhs,
                 span: _,
             } => {
-                self.infer_expr(lhs);
+                //self.infer_expr(lhs); // TODO
                 self.infer_expr(rhs);
-                self.cons
-                    .push(Constraint::Eq(lhs.ty.kind.clone(), rhs.ty.kind.clone()));
+                // self.cons
+                //     .push(Constraint::Eq(lhs.ty.kind.clone(), rhs.ty.kind.clone()));
             }
             Stmt::Block(ref mut block) => self.infer_block(block)?,
             Stmt::Expr(ref mut e) => self.infer_expr(e),
@@ -619,13 +619,13 @@ impl Visitor for TyConsGenPass {
                 span: _,
             } => {
                 // TODO(Simon): force array type
-                self.cxt.make();
+                self.cxt.push_scope();
                 let loop_var = vardef.pat.lexeme.clone();
                 self.infer_expr(&mut vardef.init);
                 self.cxt
                     .insert(vardef.pat.lexeme.clone(), vardef.init.ty.kind.clone());
                 self.infer_block(body)?;
-                self.cxt.drop();
+                self.cxt.pop_scope();
             }
             Stmt::While {
                 ref mut cond,
@@ -726,7 +726,7 @@ impl Visitor for TyConsGenPass {
                     self.infer_expr(&mut member.init);
                 }
             }
-            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This | ExprKind::Val(_) => {}
+            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This => {}
         }
 
         let tk = self.infer(&expr)?;
@@ -847,11 +847,11 @@ impl Visitor for TypeSubstitutor {
                 }
             }
             Stmt::Assign {
-                ref mut lhs,
+                ref mut target,
                 ref mut rhs,
                 ..
             } => {
-                self.subst_expr(lhs);
+                //self.subst_expr(lhs);
                 self.subst_expr(rhs);
             }
             Stmt::Ret(ref mut val, _) => {
@@ -921,7 +921,7 @@ impl Visitor for TypeSubstitutor {
             } => members
                 .iter_mut()
                 .for_each(|member| self.subst_expr(&mut member.init)),
-            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This | ExprKind::Val(_) => {}
+            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This => {}
         }
         expr.ty.kind = self.subst(&expr.ty.kind);
     }
