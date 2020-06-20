@@ -137,6 +137,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "524cbf6897b527295dff137cec09ecf3a05f4fddffd7dfcd1585403449e74198"
 
 [[package]]
+name = "dyn-fmt"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f1c543c59e2c80bb87791dfddfad1c7a3222d2c3dfd1b19c8336a5afe80acad"
+
+[[package]]
 name = "either"
 version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -317,6 +323,7 @@ dependencies = [
  "clap",
  "colored",
  "derivative",
+ "dyn-fmt",
  "failure",
  "itertools",
  "ngrammatic",

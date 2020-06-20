@@ -123,6 +123,7 @@ pub enum Intrinsic {
     Read,
     Write,
     Print,
+    Format,
 }
 
 #[derive(Clone, PartialEq, Derivative)]

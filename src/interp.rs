@@ -4,6 +4,8 @@ use std::cell::RefCell;
 use std::convert::From;
 use std::fmt;
 
+use dyn_fmt::*;
+
 use crate::errors::*;
 use crate::lexer::Lit;
 use std::collections::HashMap;
@@ -65,7 +67,7 @@ impl fmt::Display for Value {
                     .join(", ");
                 write!(f, "({})", values)
             }
-            Value::Object((path, obj)) => write!(f, "{}: {:#?}", path, obj),
+            Value::Object((path, obj)) => write!(f, "{}:{:#?}", path, obj),
             Value::Fn(fun) => write!(f, "{:#?}", fun),
         }
     }
@@ -373,8 +375,24 @@ impl Interp {
             }
             ExprKind::Intrinsic { ref kind, ref args } => match kind {
                 Intrinsic::Print => {
-                    println!("{:#?}", self.eval(args.first().unwrap()));
+                    let mut args_eval = Vec::new();
+                    let fmt_spec = cast!(self.eval(&args.first().unwrap())?, Value::Text);
+                    for arg in args.iter().skip(1) {
+                        args_eval.push(self.eval(arg)?);
+                    }
+                    println!("{}", Arguments::new(&fmt_spec, args_eval.iter()));
                     Ok(Value::Tup(Vec::new()))
+                }
+                Intrinsic::Format => {
+                    let mut args_eval = Vec::new();
+                    let fmt_spec = cast!(self.eval(&args.first().unwrap())?, Value::Text);
+                    for arg in args.iter().skip(1) {
+                        args_eval.push(self.eval(arg)?);
+                    }
+                    Ok(Value::Text(format!(
+                        "{}",
+                        Arguments::new(&fmt_spec, args_eval.iter())
+                    )))
                 }
                 _ => todo!(),
             },

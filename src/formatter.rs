@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::interp::Value;
 use crate::lexer::Lit;
 use crate::typer::{Ty, TyKind};
 
