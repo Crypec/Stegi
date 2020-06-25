@@ -77,14 +77,14 @@ impl fmt::Display for SyntaxErr {
 pub enum TypeErr {
     VarNotFound(String),
     TyNotFound(String),
-    InvalidType(TyKind, TyKind),
+    InvalidType(Ty, Ty),
     // TODO(Simon): this should really be a ty instead of just a tykind, we need the span to do proper error reporting
-    InfRec(TyKind, TyKind),
+    InfRec(Ty, Ty),
     DuplicateLitField(String),
     MissingField(String),
     InvalidField(String, String),
     FieldNotFound { ty: Ty, field: String },
-    GenericsMismatch(TyKind, TyKind),
+    GenericsMismatch(Ty, Ty),
 }
 
 impl fmt::Display for TypeErr {
