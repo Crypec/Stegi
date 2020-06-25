@@ -18,9 +18,8 @@ macro_rules! cast(
         match $val {
             $p(x) => x,
             _ => {
-                let pat = stringify!(p);
-                let val = stringify!($val);
-                panic!("Invalide Umwandlung, {:#?} entspricht nicht folgendem Muster: {:#?} dies ist wahrscheinlich ein Fehler im Typenchecker!", val, pat);
+                let pat = stringify!($p);
+                panic!("Invalide Umwandlung, {:?} entspricht nicht folgendem Muster: {:#?} dies ist wahrscheinlich ein Fehler im Typenchecker!", $val, pat);
             }
         }
     }
@@ -172,7 +171,7 @@ impl Interp {
         for decl in ast {
             if let Decl::Fn(f) = decl {
                 let name = f.header.name.lexeme.clone();
-                self.cxt.insert(name, Value::Fn(f.clone()));
+                self.cxt.insert_global(name, Value::Fn(f.clone()));
             }
         }
     }
@@ -255,7 +254,7 @@ impl Interp {
         }
     }
 
-    fn eval(&self, e: &Expr) -> Result<Value, Diagnostic> {
+    fn eval(&mut self, e: &Expr) -> Result<Value, Diagnostic> {
         match e.node {
             ExprKind::Binary {
                 ref lhs,
@@ -277,17 +276,21 @@ impl Interp {
                 ref op,
                 ref rhs,
             } => {
+                if *op == CmpOp::EqEq {
+                    return Ok(Value::Bool(self.eval(lhs)? == self.eval(rhs)?));
+                } else if *op == CmpOp::NotEq {
+                    return Ok(Value::Bool(self.eval(lhs)? != self.eval(rhs)?));
+                };
                 let lhs = cast!(self.eval(lhs)?, Value::Bool);
                 let rhs = cast!(self.eval(rhs)?, Value::Bool);
                 let res = match op {
                     CmpOp::And => lhs && rhs,
                     CmpOp::Or => lhs || rhs,
-                    CmpOp::NotEq => lhs != rhs,
-                    CmpOp::EqEq => lhs == rhs, // TODO(Simon): propper error reporting
                     CmpOp::GreaterEq => lhs >= rhs,
                     CmpOp::Greater => lhs > rhs,
                     CmpOp::Less => lhs < rhs,
                     CmpOp::LessEq => lhs <= rhs,
+                    _ => unreachable!("Covered by the if beforehand!"),
                 };
                 Ok(Value::Bool(res))
             }
@@ -307,11 +310,6 @@ impl Interp {
                 let arr = (from..to).map(|e| Value::Num(e as f64)).collect();
                 Ok(Value::Array(arr))
             }
-            ExprKind::This => Ok(self
-                .cxt
-                .get(&"selbst".to_string())
-                .expect("Failed to find ref to this!")
-                .clone()),
             ExprKind::Tup(ref elems) => {
                 let mut t = Vec::new();
                 for elem in elems {
@@ -371,7 +369,22 @@ impl Interp {
                 ref callee,
                 ref args,
             } => {
-                todo!();
+                let mut fun = cast!(self.eval(callee)?, Value::Fn);
+                let mut args_eval = Vec::new();
+                for arg in args {
+                    args_eval.push(self.eval(&arg)?);
+                }
+                debug_assert_eq!(fun.header.params.len(), args_eval.len());
+                self.cxt.push_frame();
+                for (p, arg) in fun.header.params.iter().zip(args_eval.iter()) {
+                    self.cxt.insert(p.name.lexeme.clone(), arg.clone())
+                }
+                let ret = match self.run_block(&mut fun.body)? {
+                    Some(ret_val) => Ok(ret_val),
+                    None => Ok(Value::Tup(Vec::new())),
+                };
+                self.cxt.pop_frame();
+                ret
             }
             ExprKind::Intrinsic { ref kind, ref args } => match kind {
                 Intrinsic::Print => {
@@ -396,6 +409,9 @@ impl Interp {
                 }
                 _ => todo!(),
             },
+            ExprKind::Var(ref var) | ExprKind::This(ref var) => {
+                Ok(self.cxt.get(&var.lexeme).unwrap().clone())
+            }
         }
     }
 }
@@ -498,8 +514,7 @@ impl<'a> Visitor for Interp {
             }
             Stmt::Block(ref mut block) => Ok(self.run_block(block)?),
             Stmt::Break(_) | Stmt::Continue(_) => todo!(),
-            _ => todo!(),
-            //Stmt::Ret(ref e, _) => Ok(Some(self.eval(e)?)),
+            Stmt::Ret(ref e, _) => Ok(Some(self.eval(e)?)),
         }
     }
 }

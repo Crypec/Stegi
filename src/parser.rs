@@ -982,8 +982,9 @@ impl Parser {
     fn parse_primary(&mut self) -> ParseResult<Expr> {
         match self.peek_kind()? {
             TokenKind::Keyword(Keyword::This) => {
-                let sp = self.advance()?.span;
-                let node = ExprKind::This;
+                let var = self.parse_ident()?;
+                let sp = var.span;
+                let node = ExprKind::This(var);
                 Ok(Expr::new(node, sp))
             }
             TokenKind::Lit(lit) => {
@@ -1024,14 +1025,25 @@ impl Parser {
             },
             _ => {
                 let span = pat.span;
-                Ok(Expr {
-                    node: ExprKind::Path(pat),
-                    span,
-                    ty: Ty {
-                        kind: TyKind::Infer,
+                if pat.len() == 1 {
+                    Ok(Expr {
+                        node: ExprKind::Var(pat.first().unwrap().clone()),
                         span,
-                    },
-                })
+                        ty: Ty {
+                            kind: TyKind::Infer,
+                            span,
+                        },
+                    })
+                } else {
+                    Ok(Expr {
+                        node: ExprKind::Path(pat),
+                        span,
+                        ty: Ty {
+                            kind: TyKind::Infer,
+                            span,
+                        },
+                    })
+                }
             }
         }
     }
