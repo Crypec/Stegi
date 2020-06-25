@@ -49,13 +49,13 @@ impl Ty {
 
 #[derive(Clone)]
 enum Constraint {
-    Eq(TyKind, TyKind),
+    Eq(Ty, Ty),
 }
 
 impl fmt::Debug for Constraint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Constraint::Eq(lhs, rhs) => write!(f, "{} == {}", lhs.to_str(), rhs.to_str()),
+            Constraint::Eq(lhs, rhs) => write!(f, "{} == {}", lhs, rhs),
         }
     }
 }
@@ -82,7 +82,7 @@ pub enum TyKind {
 
     Id(usize),
 
-    Fn(FnDecl),
+    Fn(Vec<Ty>, Box<Ty>),
 
     #[derivative(Debug = "transparent")]
     Poly(Ident),
@@ -165,7 +165,10 @@ impl TyKind {
             TyKind::Bool => "Bool".to_string(),
             TyKind::Path(p) => format!("{}", p),
             TyKind::Text => "Text".to_string(),
-            TyKind::Fn(f) => format!("fun: {}", f.header),
+            TyKind::Fn(params, ret) => {
+                let params = params.iter().map(|p| format!("{}", p)).join(",");
+                format!("fun: ({}) -> {}", params, ret)
+            }
             TyKind::Tup(elems) => {
                 let mut sb = String::from("(");
                 for e in elems {
@@ -189,18 +192,108 @@ impl Typer {
     }
 
     pub fn infer(&self, ast: &mut AST) -> Vec<Diagnostic> {
+        let mut errs = Vec::new();
+        errs.extend(TyLoweringPass::new().apply(ast));
         let (subst, diags) = TyConsGenPass::new().gen(ast);
         if !diags.is_empty() {
-            return diags;
+            errs.extend(diags);
+            return errs;
         }
         TypeSubstitutor::new(subst).apply_subst(ast);
         Vec::new()
     }
 }
 
+pub struct TyLoweringPass {
+    ty_table: HashMap<String, TyDecl>,
+}
+
+impl TyLoweringPass {
+    fn new() -> Self {
+        Self {
+            ty_table: HashMap::new(),
+        }
+    }
+    fn apply(&mut self, ast: &mut AST) -> Vec<Diagnostic> {
+        let mut diag = Vec::new();
+        self.fill_ty_table(&ast);
+        for decl in ast.iter_mut() {
+            match decl {
+                Decl::TyDecl(TyDecl::Struct(s)) => {
+                    for (name, ty) in s.fields.iter_mut() {
+                        if !self.is_available(&ty) {
+                            diag.push(Diagnostic {
+                                kind: ErrKind::Type(TypeErr::TyNotFound(format!("{}", &ty))),
+                                span: ty.span,
+                                suggestions: Vec::new(),
+                            })
+                        }
+                        ty.infer_internal();
+                    }
+                }
+                Decl::TyDecl(TyDecl::Enum(e)) => {
+                    for var in e.variants.iter_mut() {
+                        if let VariantData::Val(ref mut elems) = var.data {
+                            for e in elems.iter_mut() {
+                                if !self.is_available(&e) {
+                                    diag.push(Diagnostic {
+                                        kind: ErrKind::Type(TypeErr::TyNotFound(format!("{}", &e))),
+                                        span: e.span,
+                                        suggestions: Vec::new(),
+                                    })
+                                }
+                                e.infer_internal();
+                            }
+                        }
+                    }
+                }
+                Decl::Fn(ref mut f) => {
+                    for p in &mut f.header.params {
+                        p.ty.infer_internal();
+                    }
+                    f.header.ret_ty.infer_internal();
+                }
+                _ => continue,
+            }
+        }
+        diag
+    }
+
+    fn is_available(&self, ty: &Ty) -> bool {
+        match ty.kind {
+            TyKind::Num | TyKind::Text | TyKind::Bool => true,
+            TyKind::Array(ref elem) => self.is_available(elem),
+            TyKind::Path(ref path) => {
+                if path.len() > 1 {
+                    panic!(
+                        "Externe Typenmodule sind zum aktuellen Zeitpunkt noch nicht unterstuezt!"
+                    );
+                } else {
+                    self.ty_table.contains_key(&path.first().unwrap().lexeme)
+                }
+            }
+            TyKind::Tup(ref elems) => elems.iter().any(|e| !self.is_available(&e)),
+            TyKind::Id(_)
+            | TyKind::Infer
+            | TyKind::Enum(_)
+            | TyKind::Struct(_)
+            | TyKind::Fn(..)
+            | TyKind::Poly(_) => false,
+        }
+    }
+
+    fn fill_ty_table(&mut self, ast: &AST) {
+        for d in ast.iter() {
+            if let Decl::TyDecl(t) = d {
+                self.ty_table.insert(t.name().lexeme.clone(), t.clone());
+            }
+        }
+    }
+}
+
 pub struct TyConsGenPass {
-    cxt: Cxt<String, TyKind>,
-    subst: Vec<TyKind>,
+    cxt: Cxt<String, Ty>,
+    subst: Vec<Ty>,
     cons: Vec<Constraint>,
     diagnostics: Vec<Diagnostic>,
 }
@@ -215,25 +308,28 @@ impl TyConsGenPass {
         }
     }
 
-    fn new_id(&mut self) -> TyKind {
-        let res = TyKind::Id(self.subst.len());
+    fn new_id(&mut self, span: Span) -> Ty {
+        let res = Ty {
+            kind: TyKind::Id(self.subst.len()),
+            span,
+        };
         self.subst.push(res.clone());
         res
     }
 
-    fn unify(&mut self, lhs: &TyKind, rhs: &TyKind) {
-        match (lhs, rhs) {
-            (TyKind::Id(i), _) if self.subst(*i) != TyKind::Id(*i) => {
+    fn unify(&mut self, lhs: &Ty, rhs: &Ty) {
+        match (&lhs.kind, &rhs.kind) {
+            (TyKind::Id(i), _) if self.subst(*i).kind != TyKind::Id(*i) => {
                 self.unify(&self.subst(*i), rhs)
             }
-            (_, TyKind::Id(i)) if self.subst(*i) != TyKind::Id(*i) => {
+            (_, TyKind::Id(i)) if self.subst(*i).kind != TyKind::Id(*i) => {
                 self.unify(lhs, &self.subst(*i))
             }
             (TyKind::Id(i), _) => {
                 if self.occurs_in(*i, rhs) {
                     let err = ErrKind::Type(TypeErr::InfRec(lhs.clone(), rhs.clone()));
                     // FIXME(Simon): use ty instead of tykind to report errors properly
-                    self.span_err(err, Span { lo: 0, hi: 0 });
+                    self.span_err(err, lhs.span);
                 } else {
                     self.subst[*i] = rhs.clone();
                 }
@@ -242,21 +338,32 @@ impl TyConsGenPass {
                 if self.occurs_in(*i, lhs) {
                     let err = ErrKind::Type(TypeErr::InfRec(lhs.clone(), rhs.clone()));
                     // FIXME(Simon): use ty instead of tykind to report errors properly
-                    self.span_err(err, Span { lo: 0, hi: 0 });
+                    self.span_err(err, lhs.span);
                 } else {
                     self.subst[*i] = lhs.clone();
                 }
             }
-            (TyKind::Array(box lt), TyKind::Array(box rt)) => self.unify(&lt.kind, &rt.kind),
+            (TyKind::Array(box lt), TyKind::Array(box rt)) => self.unify(&lt, &rt),
             (TyKind::Tup(lt), TyKind::Tup(rt)) => {
                 if lt.len() != rt.len() {
                     let err = ErrKind::Type(TypeErr::GenericsMismatch(lhs.clone(), rhs.clone()));
-                    self.span_err(err, Span { lo: 0, hi: 0 });
+                    self.span_err(err, lhs.span);
                 } else {
                     lt.iter()
                         .zip(rt.iter())
-                        .for_each(|(t1, t2)| self.unify(&t1.kind, &t2.kind));
+                        .for_each(|(t1, t2)| self.unify(&t1, &t2));
                 }
+            }
+            (TyKind::Fn(lp, l_ret), TyKind::Fn(rp, r_ret)) => {
+                if lp.len() != rp.len() {
+                    let err = ErrKind::Type(TypeErr::GenericsMismatch(lhs.clone(), rhs.clone()));
+                    self.span_err(err, lhs.span);
+                } else {
+                    lp.iter()
+                        .zip(rp.iter())
+                        .for_each(|(t1, t2)| self.unify(&t1, &t2));
+                }
+                self.unify(&l_ret, &r_ret)
             }
             (TyKind::Bool, TyKind::Bool)
             | (TyKind::Text, TyKind::Text)
@@ -264,42 +371,56 @@ impl TyConsGenPass {
             _ => {
                 self.span_err(
                     ErrKind::Type(TypeErr::InvalidType(lhs.clone(), rhs.clone())),
-                    Span { lo: 0, hi: 0 },
+                    rhs.span,
                 );
             }
         };
     }
 
-    fn occurs_in(&self, index: usize, tk: &TyKind) -> bool {
-        match tk {
-            TyKind::Id(i) if self.subst(*i) != TyKind::Id(*i) => {
-                self.occurs_in(index, &self.subst(*i))
+    fn occurs_in(&self, index: usize, tk: &Ty) -> bool {
+        match tk.kind {
+            TyKind::Id(i) if self.subst(i).kind != TyKind::Id(i) => {
+                self.occurs_in(index, &self.subst(i))
             }
-            TyKind::Id(i) => *i == index,
-            TyKind::Tup(ref tup) => tup.iter().any(|elem| self.occurs_in(index, &elem.kind)),
+            TyKind::Id(i) => i == index,
+            TyKind::Tup(ref tup) => tup.iter().any(|elem| self.occurs_in(index, &elem)),
             _ => false,
         }
     }
 
-    fn subst(&self, i: usize) -> TyKind {
+    fn subst(&self, i: usize) -> Ty {
         self.subst[i].clone()
     }
 
-    pub fn gen(&mut self, ast: &mut AST) -> (Vec<TyKind>, Vec<Diagnostic>) {
-        for d in ast.iter_mut() {
-            if let Decl::TyDecl(t) = d {
-                match t {
-                    TyDecl::Struct(ref mut s) => {
-                        Self::infer_struct(s);
-                        self.cxt
-                            .insert_global(s.name.lexeme.clone(), TyKind::Struct(s.clone()));
-                    }
-                    TyDecl::Enum(e) => {
-                        Self::infer_enum(e);
-                        self.cxt
-                            .insert_global(e.name.lexeme.clone(), TyKind::Enum(e.clone()));
-                    }
+    pub fn gen(&mut self, ast: &mut AST) -> (Vec<Ty>, Vec<Diagnostic>) {
+        for d in ast.iter() {
+            match d {
+                Decl::TyDecl(TyDecl::Struct(s)) => self.cxt.insert_global(
+                    s.name.lexeme.clone(),
+                    Ty {
+                        kind: TyKind::Struct(s.clone()),
+                        span: s.span,
+                    },
+                ),
+                Decl::TyDecl(TyDecl::Enum(e)) => self.cxt.insert_global(
+                    e.name.lexeme.clone(),
+                    Ty {
+                        kind: TyKind::Enum(e.clone()),
+                        span: e.span,
+                    },
+                ),
+                Decl::Fn(f) => {
+                    let params = f.header.params.iter().map(|p| p.ty.clone()).collect();
+                    let name = &f.header.name.lexeme;
+                    self.cxt.insert_global(
+                        name.clone(),
+                        Ty {
+                            kind: TyKind::Fn(params, f.header.ret_ty.clone()),
+                            span: f.span,
+                        },
+                    )
                 }
+                _ => continue,
             }
         }
 
@@ -319,14 +440,26 @@ impl TyConsGenPass {
         }
     }
 
+    fn gen_ret_cons(&mut self, block: &mut Block, ret_ty: &Ty) {
+        for stmt in &mut block.stmts {
+            if let Stmt::Ret(ref mut e, _) = stmt {
+                let ty = self.infer_expr(e);
+                self.cons.push(Constraint::Eq(e.ty.clone(), ret_ty.clone()));
+            } else if let Stmt::Block(ref mut block) = stmt {
+                self.gen_ret_cons(block, ret_ty);
+            }
+        }
+    }
+
     fn infer_fn(&mut self, f: &mut FnDecl) -> Result<(), Diagnostic> {
         self.cxt.push_frame();
+        self.gen_ret_cons(&mut f.body, &f.header.ret_ty);
         for p in f.header.params.iter_mut() {
             match p.ty.kind {
                 TyKind::Poly(_) => todo!(),
                 _ => {
                     p.ty.infer_internal();
-                    self.cxt.insert(p.name.lexeme.clone(), p.ty.kind.clone());
+                    self.cxt.insert(p.name.lexeme.clone(), p.ty.clone());
                 }
             }
         }
@@ -357,7 +490,7 @@ impl TyConsGenPass {
         todo!()
     }
 
-    pub fn infer(&mut self, e: &Expr) -> Result<TyKind, Diagnostic> {
+    pub fn infer(&mut self, e: &Expr) -> Result<Ty, Diagnostic> {
         match e.node {
             ExprKind::Binary {
                 ref lhs,
@@ -365,10 +498,27 @@ impl TyConsGenPass {
                 ref rhs,
             } => {
                 let lhs = self.infer(lhs)?;
+                let sp = lhs.span;
+                self.cons.push(Constraint::Eq(
+                    lhs,
+                    Ty {
+                        kind: TyKind::Num,
+                        span: sp,
+                    },
+                ));
                 let rhs = self.infer(rhs)?;
-                self.cons.push(Constraint::Eq(lhs, TyKind::Num));
-                self.cons.push(Constraint::Eq(rhs, TyKind::Num));
-                Ok(TyKind::Num)
+                let sp = rhs.span;
+                self.cons.push(Constraint::Eq(
+                    rhs,
+                    Ty {
+                        kind: TyKind::Num,
+                        span: sp,
+                    },
+                ));
+                Ok(Ty {
+                    kind: TyKind::Num,
+                    span: e.span,
+                })
             }
             ExprKind::Logical {
                 ref lhs,
@@ -376,10 +526,27 @@ impl TyConsGenPass {
                 ref rhs,
             } => {
                 let lhs = self.infer(lhs)?;
+                let sp = lhs.span;
+                self.cons.push(Constraint::Eq(
+                    lhs,
+                    Ty {
+                        kind: TyKind::Bool,
+                        span: sp,
+                    },
+                ));
                 let rhs = self.infer(rhs)?;
-                self.cons.push(Constraint::Eq(lhs, TyKind::Bool));
-                self.cons.push(Constraint::Eq(rhs, TyKind::Bool));
-                Ok(TyKind::Bool)
+                let span = rhs.span;
+                self.cons.push(Constraint::Eq(
+                    rhs,
+                    Ty {
+                        kind: TyKind::Bool,
+                        span,
+                    },
+                ));
+                Ok(Ty {
+                    kind: TyKind::Bool,
+                    span: e.span,
+                })
             }
             ExprKind::Unary { ref rhs, ref op } => {
                 let rhs = self.infer(rhs)?;
@@ -387,18 +554,25 @@ impl TyConsGenPass {
                     UnaryOp::Minus => TyKind::Num,
                     UnaryOp::Not => TyKind::Bool,
                 };
-                self.cons.push(Constraint::Eq(rhs, tk.clone()));
-                Ok(tk)
+                let res = Ty {
+                    kind: tk,
+                    span: e.span,
+                };
+                self.cons.push(Constraint::Eq(rhs, res.clone()));
+                Ok(res)
             }
             ExprKind::Array(ref arr) => {
                 let first_tk = match arr.first() {
                     Some(e) => self.infer(e)?,
-                    None => self.new_id(),
+                    None => self.new_id(e.span),
                 };
-                let elem_ty = TyKind::Array(box Ty {
-                    kind: first_tk.clone(),
-                    span: e.span,
-                });
+                let elem_ty = Ty {
+                    kind: TyKind::Array(box Ty {
+                        kind: first_tk.kind.clone(),
+                        span: e.span,
+                    }),
+                    span: first_tk.span,
+                };
                 for elem in arr {
                     let tk = self.infer(elem)?;
                     self.cons.push(Constraint::Eq(tk, first_tk.clone()));
@@ -408,12 +582,12 @@ impl TyConsGenPass {
             ExprKind::Tup(ref tup) => {
                 let mut t = Vec::new();
                 for elem in tup {
-                    t.push(Ty {
-                        span: elem.span,
-                        kind: self.infer(elem)?,
-                    });
+                    t.push(self.infer(&elem)?)
                 }
-                Ok(TyKind::Tup(t))
+                Ok(Ty {
+                    kind: TyKind::Tup(t),
+                    span: e.span,
+                })
             }
             ExprKind::Path(ref path) => {
                 let name = path.first().unwrap().lexeme.clone();
@@ -441,30 +615,68 @@ impl TyConsGenPass {
                     kind: TyKind::Num,
                     span: from.span.combine(&to.span),
                 };
-                Ok(TyKind::Array(Box::new(ty)))
+                Ok(Ty {
+                    kind: TyKind::Array(Box::new(ty)),
+                    span: e.span,
+                })
             }
-            ExprKind::Lit(ref lit) => Ok(Self::infer_lit(lit)),
+            ExprKind::Lit(ref lit) => Ok(Ty {
+                kind: Self::infer_lit(lit),
+                span: e.span,
+            }),
             ExprKind::Index {
                 ref callee,
                 ref index,
             } => {
                 let index = self.infer(index)?;
+                let span = index.span;
                 let callee_ty = self.infer(callee)?;
-                self.cons.push(Constraint::Eq(index, TyKind::Num));
-                // let arr = TyKind::Array(box Ty {
-                //     kind: TyKind::Infer,
-                //     span: callee.span,
-                // });
-                //self.cons.push(Constraint::Eq(callee_ty, arr.clone()));
-                //Ok(arr)
-                Ok(TyKind::Num)
+                self.cons.push(Constraint::Eq(
+                    index,
+                    Ty {
+                        kind: TyKind::Num,
+                        span,
+                    },
+                ));
+                let arr = Ty {
+                    kind: TyKind::Array(box self.new_id(e.span)),
+                    span: e.span,
+                };
+                self.cons.push(Constraint::Eq(callee_ty, arr.clone()));
+                Ok(arr)
             }
-            ExprKind::This {} => todo!(),
+            ExprKind::Var(ref var) | ExprKind::This(ref var) => match self.cxt.get(&var.lexeme) {
+                Some(t) => Ok(t.clone()),
+                None => Err(Diagnostic {
+                    kind: ErrKind::Type(TypeErr::VarNotFound(var.lexeme.clone())),
+                    span: var.span,
+                    suggestions: Vec::new(),
+                }),
+            },
             ExprKind::Call {
                 ref callee,
                 ref args,
-            } => todo!(),
-            ExprKind::Intrinsic { ref kind, ref args } => Ok(TyKind::Num),
+            } => {
+                let callee_ty = self.infer(callee)?;
+                let mut args_buf = Vec::new();
+                for arg in args.iter() {
+                    args_buf.push(self.infer(arg)?);
+                }
+                let id = self.new_id(e.span);
+                let f_ty = Ty {
+                    kind: TyKind::Fn(args_buf, box id.clone()),
+                    span: e.span,
+                };
+                self.cons.push(Constraint::Eq(f_ty, callee_ty));
+                Ok(id)
+            }
+            ExprKind::Intrinsic { ref kind, ref args } => match kind {
+                Intrinsic::Format | Intrinsic::Read => Ok(Ty {
+                    kind: TyKind::Text,
+                    span: e.span,
+                }),
+                Intrinsic::Print | Intrinsic::Write => Ok(Ty::default_unit_type(e.span)),
+            },
             ExprKind::Field(ref callee, ref field) => todo!(),
             //ExprKind::Val(ref val) => todo!(),
         }
@@ -478,27 +690,32 @@ impl TyConsGenPass {
         }
     }
 
-    fn infer_struct_lit(
-        &mut self,
-        name: &Ident,
-        members: &Vec<Member>,
-    ) -> Result<TyKind, Diagnostic> {
+    fn infer_struct_lit(&mut self, name: &Ident, members: &Vec<Member>) -> Result<Ty, Diagnostic> {
         let str_name = name.lexeme.clone();
 
         match self.cxt.get(&str_name).cloned() {
-            Some(TyKind::Struct(s)) => {
-                // FIXME(Simon): this fails to detect if the user had more than 1 duplicate struct literal field!!!
-                Self::check_duplicates_field(&members)?;
-                self.check_forgotten_fields(&s, &members);
+            Some(s) => {
+                if let TyKind::Struct(s) = s.kind {
+                    // FIXME(Simon): this fails to detect if the user had more than 1 duplicate struct literal field!!!
+                    Self::check_duplicates_field(&members)?;
+                    self.check_forgotten_fields(&s, &members);
 
-                for member in members {
-                    let member_ty = self.infer(&member.init)?;
-                    if let Some(ty) = s.fields.get(&member.name) {
-                        self.cons
-                            .push(Constraint::Eq(ty.kind.clone(), member_ty.clone()))
+                    for member in members {
+                        let member_ty = self.infer(&member.init)?;
+                        if let Some(ty) = s.fields.get(&member.name) {
+                            self.cons
+                                .push(Constraint::Eq(ty.clone(), member_ty.clone()))
+                        }
                     }
+                    Ok(Ty {
+                        kind: TyKind::Struct(s),
+                        span: name.span,
+                    })
+                } else {
+                    let err = ErrKind::Type(TypeErr::TyNotFound(str_name));
+                    // TODO(Simon): provide suggestions which type might be meant
+                    Err(self.span_err(err, name.span))
                 }
-                Ok(TyKind::Struct(s))
             }
 
             _ => {
@@ -568,7 +785,7 @@ impl TyConsGenPass {
 
     fn link_cons(&mut self, e: &Expr) {
         let tk = self.infer(&e).unwrap();
-        let id = self.new_id();
+        let id = self.new_id(e.span);
         self.cons.push(Constraint::Eq(tk, id));
     }
 
@@ -592,14 +809,17 @@ impl Visitor for TyConsGenPass {
         match stmt {
             Stmt::VarDef(ref mut vd) => {
                 let tk = match vd.ty.kind {
-                    TyKind::Infer => self.new_id(),
-                    _ => vd.ty.kind.clone(),
+                    TyKind::Infer => self.new_id(vd.pat.span),
+                    _ => {
+                        vd.ty.infer_internal();
+                        vd.ty.clone()
+                    }
                 };
-                vd.ty.kind = tk.clone();
+                vd.ty = tk.clone();
                 self.cxt.insert(vd.pat.lexeme.clone(), tk.clone());
                 let init_ty = self.infer_expr(&mut vd.init);
                 self.cons
-                    .push(Constraint::Eq(vd.init.ty.kind.clone(), tk.clone()))
+                    .push(Constraint::Eq(vd.init.ty.clone(), tk.clone()))
             }
             Stmt::Assign {
                 ref mut target,
@@ -623,7 +843,7 @@ impl Visitor for TyConsGenPass {
                 let loop_var = vardef.pat.lexeme.clone();
                 self.infer_expr(&mut vardef.init);
                 self.cxt
-                    .insert(vardef.pat.lexeme.clone(), vardef.init.ty.kind.clone());
+                    .insert(vardef.pat.lexeme.clone(), vardef.init.ty.clone());
                 self.infer_block(body)?;
                 self.cxt.pop_scope();
             }
@@ -633,8 +853,13 @@ impl Visitor for TyConsGenPass {
                 span: _,
             } => {
                 self.infer_expr(cond);
-                self.cons
-                    .push(Constraint::Eq(TyKind::Bool, cond.ty.kind.clone()));
+                self.cons.push(Constraint::Eq(
+                    Ty {
+                        kind: TyKind::Bool,
+                        span: cond.span,
+                    },
+                    cond.ty.clone(),
+                ));
                 self.infer_block(body)?;
             }
             Stmt::If {
@@ -645,14 +870,24 @@ impl Visitor for TyConsGenPass {
                 span: _,
             } => {
                 self.infer_expr(cond);
-                self.cons
-                    .push(Constraint::Eq(cond.ty.kind.clone(), TyKind::Bool));
+                self.cons.push(Constraint::Eq(
+                    cond.ty.clone(),
+                    Ty {
+                        kind: TyKind::Bool,
+                        span: cond.span,
+                    },
+                ));
                 self.infer_block(body)?;
 
                 for branch in else_branches.iter_mut() {
                     self.infer_expr(&mut branch.cond);
-                    self.cons
-                        .push(Constraint::Eq(branch.cond.ty.kind.clone(), TyKind::Bool));
+                    self.cons.push(Constraint::Eq(
+                        branch.cond.ty.clone(),
+                        Ty {
+                            kind: TyKind::Bool,
+                            span: branch.cond.span,
+                        },
+                    ));
                     self.infer_block(&mut branch.body)?;
                 }
                 if let Some(fb) = final_branch {
@@ -711,7 +946,7 @@ impl Visitor for TyConsGenPass {
                 ref mut callee,
                 ref mut args,
             } => {
-                self.infer_expr(callee);
+                let callee = self.infer_expr(callee);
                 args.iter_mut().for_each(|elem| self.infer_expr(elem));
             }
             ExprKind::Intrinsic {
@@ -726,23 +961,23 @@ impl Visitor for TyConsGenPass {
                     self.infer_expr(&mut member.init);
                 }
             }
-            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This => {}
+            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This(_) | ExprKind::Var(_) => {}
         }
 
         let tk = self.infer(&expr)?;
-        let id = self.new_id();
-        expr.ty.kind = id.clone();
+        let id = self.new_id(expr.span);
+        expr.ty = id.clone();
         self.cons.push(Constraint::Eq(tk, id));
         Ok(())
     }
 }
 
 struct TypeSubstitutor {
-    substitutions: Vec<TyKind>,
+    substitutions: Vec<Ty>,
 }
 
 impl TypeSubstitutor {
-    pub fn new(substitutions: Vec<TyKind>) -> Self {
+    pub fn new(substitutions: Vec<Ty>) -> Self {
         Self { substitutions }
     }
 
@@ -752,32 +987,32 @@ impl TypeSubstitutor {
         }
     }
 
-    pub fn subst(&self, t: &TyKind) -> TyKind {
-        match t {
-            TyKind::Id(i) if self.substitutions[*i] != TyKind::Id(*i) => {
-                self.subst(&self.substitutions[*i].clone())
+    pub fn subst(&self, t: &Ty) -> Ty {
+        match t.kind {
+            TyKind::Id(i) if self.substitutions[i].kind != TyKind::Id(i) => {
+                self.subst(&self.substitutions[i].clone())
             }
             TyKind::Tup(ref tup) => {
                 let mut subst_tup = Vec::new();
                 for elem in tup {
-                    subst_tup.push(Ty {
-                        kind: self.subst(&elem.kind),
-                        span: elem.span,
-                    });
+                    subst_tup.push(self.subst(&elem));
                 }
-                TyKind::Tup(subst_tup)
+                Ty {
+                    kind: TyKind::Tup(subst_tup),
+                    span: t.span,
+                }
             }
-            TyKind::Array(ref elem) => TyKind::Array(box Ty {
-                kind: self.subst(&elem.kind),
-                span: elem.span,
-            }),
+            TyKind::Array(ref elem) => Ty {
+                kind: TyKind::Array(box self.subst(elem)),
+                span: t.span,
+            },
             _ => t.clone(),
         }
     }
 
     fn subst_fn(&mut self, f: &mut FnDecl) {
         for param in f.header.params.iter_mut() {
-            param.ty.kind = self.subst(&param.ty.kind);
+            param.ty = self.subst(&param.ty);
         }
         self.subst_block(&mut f.body);
     }
@@ -814,7 +1049,7 @@ impl Visitor for TypeSubstitutor {
             }
             Stmt::VarDef(ref mut vd) => {
                 self.subst_expr(&mut vd.init);
-                vd.ty.kind = self.subst(&vd.ty.kind);
+                vd.ty = self.subst(&vd.ty);
             }
             Stmt::Expr(ref mut e) => {
                 self.subst_expr(e);
@@ -824,7 +1059,7 @@ impl Visitor for TypeSubstitutor {
                 ref mut body,
                 ..
             } => {
-                vardef.ty.kind = self.subst(&vardef.ty.kind);
+                vardef.ty = self.subst(&vardef.ty);
                 self.subst_expr(&mut vardef.init);
             }
             Stmt::If {
@@ -871,6 +1106,7 @@ impl Visitor for TypeSubstitutor {
                 self.subst_expr(lhs);
                 self.subst_expr(rhs);
             }
+            ExprKind::Var(ref var) => todo!(),
             ExprKind::Logical {
                 ref mut lhs,
                 op: _,
@@ -921,8 +1157,8 @@ impl Visitor for TypeSubstitutor {
             } => members
                 .iter_mut()
                 .for_each(|member| self.subst_expr(&mut member.init)),
-            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This => {}
+            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This(_) => {}
         }
-        expr.ty.kind = self.subst(&expr.ty.kind);
+        expr.ty = self.subst(&expr.ty);
     }
 }

@@ -48,17 +48,32 @@ impl Driver {
             .map(Result::unwrap_err)
             .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
             .for_each(|diag| println!("{}", diag));
-        //Typer::new().infer(&mut ast);
-        Interp::new().interp(&mut ast);
+
+        self.sess.diagnostics.extend(Typer::new().infer(&mut ast));
+
         let had_err = self.sess.diagnostics.iter().any(|d| match d.kind {
             ErrKind::Runtime(_) | ErrKind::Syntax(_) | ErrKind::Type(_) | ErrKind::Internal(_) => {
                 true
             }
             ErrKind::Warning { .. } => false,
         });
+
+        self.sess
+            .diagnostics
+            .iter()
+            .map(|d| UserDiagnostic {
+                src_map: current_src_map.clone(),
+                kind: d.kind.clone(),
+                span: d.span,
+                suggestions: d.suggestions.clone(),
+            })
+            .for_each(|ud| eprintln!("{}", ud));
+
         if had_err {
             eprintln!("Fehler beim Kompilieren gefunden. Programm wird nicht ausgefuehrt! :c\n");
+            std::process::exit(1);
         }
+        Interp::new().interp(&mut ast);
 
         //     self.sess
         //         .borrow()
