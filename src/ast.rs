@@ -1,7 +1,5 @@
 use super::lexer::*;
 use crate::errors::*;
-use crate::errors::*;
-use crate::interp::*;
 use crate::typer::*;
 
 use std::collections::HashMap;

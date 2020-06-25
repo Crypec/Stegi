@@ -588,7 +588,6 @@ impl Parser {
             self.expect(TokenKind::Colon, "feldname")?;
             let ty = self.parse_ty_specifier()?;
 
-            let span = name.span.combine(&ty.span);
             fields.insert(name, ty);
 
             match self.peek_kind()? {

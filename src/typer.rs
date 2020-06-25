@@ -220,7 +220,7 @@ impl TyLoweringPass {
         for decl in ast.iter_mut() {
             match decl {
                 Decl::TyDecl(TyDecl::Struct(s)) => {
-                    for (name, ty) in s.fields.iter_mut() {
+                    for (_, ty) in s.fields.iter_mut() {
                         if !self.is_available(&ty) {
                             diag.push(Diagnostic {
                                 kind: ErrKind::Type(TypeErr::TyNotFound(format!("{}", &ty))),
@@ -440,20 +440,51 @@ impl TyConsGenPass {
         }
     }
 
-    fn gen_ret_cons(&mut self, block: &mut Block, ret_ty: &Ty) {
+    fn gen_ret_cons(&mut self, block: &mut Block, ret_ty: &Ty) -> Result<(), Diagnostic> {
         for stmt in &mut block.stmts {
-            if let Stmt::Ret(ref mut e, _) = stmt {
-                let ty = self.infer_expr(e);
-                self.cons.push(Constraint::Eq(e.ty.clone(), ret_ty.clone()));
-            } else if let Stmt::Block(ref mut block) = stmt {
-                self.gen_ret_cons(block, ret_ty);
+            match stmt {
+                Stmt::Ret(ref mut e, _) => {
+                    e.ty = self.new_id(e.span);
+                    self.cons.push(Constraint::Eq(e.ty.clone(), ret_ty.clone()));
+                }
+                Stmt::If {
+                    cond: _,
+                    ref mut body,
+                    ref mut else_branches,
+                    ref mut final_branch,
+                    span: _,
+                } => {
+                    self.gen_ret_cons(body, ret_ty)?;
+                    for branch in else_branches {
+                        self.gen_ret_cons(&mut branch.body, ret_ty)?;
+                    }
+                    if let Some(ref mut fb) = final_branch {
+                        self.gen_ret_cons(&mut fb.body, ret_ty)?;
+                    }
+                }
+                Stmt::While {
+                    cond: _,
+                    ref mut body,
+                    span: _,
+                } => {
+                    self.gen_ret_cons(body, ret_ty)?;
+                }
+                Stmt::For {
+                    vardef: _,
+                    ref mut body,
+                    span: _,
+                } => {
+                    self.gen_ret_cons(body, ret_ty)?;
+                }
+                _ => continue,
             }
         }
+        Ok(())
     }
 
     fn infer_fn(&mut self, f: &mut FnDecl) -> Result<(), Diagnostic> {
         self.cxt.push_frame();
-        self.gen_ret_cons(&mut f.body, &f.header.ret_ty);
+        self.gen_ret_cons(&mut f.body, &f.header.ret_ty)?;
         for p in f.header.params.iter_mut() {
             match p.ty.kind {
                 TyKind::Poly(_) => todo!(),
@@ -483,11 +514,6 @@ impl TyConsGenPass {
         };
         self.diagnostics.push(diag.clone());
         diag
-    }
-
-    fn check_enum_arm(&mut self, enum_arm: Path) -> Result<Ty, Diagnostic> {
-        let name = enum_arm.first().unwrap();
-        todo!()
     }
 
     pub fn infer(&mut self, e: &Expr) -> Result<Ty, Diagnostic> {
@@ -522,31 +548,60 @@ impl TyConsGenPass {
             }
             ExprKind::Logical {
                 ref lhs,
-                op: _,
+                ref op,
                 ref rhs,
             } => {
                 let lhs = self.infer(lhs)?;
-                let sp = lhs.span;
-                self.cons.push(Constraint::Eq(
-                    lhs,
-                    Ty {
-                        kind: TyKind::Bool,
-                        span: sp,
-                    },
-                ));
                 let rhs = self.infer(rhs)?;
-                let span = rhs.span;
-                self.cons.push(Constraint::Eq(
-                    rhs,
-                    Ty {
-                        kind: TyKind::Bool,
-                        span,
-                    },
-                ));
-                Ok(Ty {
-                    kind: TyKind::Bool,
-                    span: e.span,
-                })
+                match op {
+                    CmpOp::And | CmpOp::Or => {
+                        self.cons.push(Constraint::Eq(
+                            lhs.clone(),
+                            Ty {
+                                kind: TyKind::Bool,
+                                span: lhs.span,
+                            },
+                        ));
+                        self.cons.push(Constraint::Eq(
+                            rhs.clone(),
+                            Ty {
+                                kind: TyKind::Bool,
+                                span: rhs.span,
+                            },
+                        ));
+                        Ok(Ty {
+                            kind: TyKind::Bool,
+                            span: e.span,
+                        })
+                    }
+                    CmpOp::Greater | CmpOp::GreaterEq | CmpOp::Less | CmpOp::LessEq => {
+                        self.cons.push(Constraint::Eq(
+                            lhs.clone(),
+                            Ty {
+                                kind: TyKind::Num,
+                                span: lhs.span,
+                            },
+                        ));
+                        self.cons.push(Constraint::Eq(
+                            rhs.clone(),
+                            Ty {
+                                kind: TyKind::Num,
+                                span: lhs.span,
+                            },
+                        ));
+                        Ok(Ty {
+                            kind: TyKind::Num,
+                            span: e.span,
+                        })
+                    }
+                    CmpOp::EqEq | CmpOp::NotEq => {
+                        self.cons.push(Constraint::Eq(lhs, rhs));
+                        Ok(Ty {
+                            kind: TyKind::Bool,
+                            span: e.span,
+                        })
+                    }
+                }
             }
             ExprKind::Unary { ref rhs, ref op } => {
                 let rhs = self.infer(rhs)?;
@@ -599,11 +654,7 @@ impl TyConsGenPass {
                             path.span,
                         )),
                     },
-                    _ => {
-                        // NOTE(Simon): Handle enums
-                        let name = path.first().unwrap();
-                        todo!();
-                    }
+                    _ => todo!(),
                 }
             }
             ExprKind::Struct {
@@ -670,7 +721,8 @@ impl TyConsGenPass {
                 self.cons.push(Constraint::Eq(f_ty, callee_ty));
                 Ok(id)
             }
-            ExprKind::Intrinsic { ref kind, ref args } => match kind {
+            // TODO(Simon): Type constrains for intrinsic functions
+            ExprKind::Intrinsic { ref kind, args: _ } => match kind {
                 Intrinsic::Format | Intrinsic::Read => Ok(Ty {
                     kind: TyKind::Text,
                     span: e.span,
@@ -678,7 +730,6 @@ impl TyConsGenPass {
                 Intrinsic::Print | Intrinsic::Write => Ok(Ty::default_unit_type(e.span)),
             },
             ExprKind::Field(ref callee, ref field) => todo!(),
-            //ExprKind::Val(ref val) => todo!(),
         }
     }
 
@@ -796,7 +847,7 @@ impl TyConsGenPass {
 
 impl Visitor for TyConsGenPass {
     type Result = Result<(), Diagnostic>;
-    fn visit_decl(&mut self, decl: &mut Decl) -> Self::Result {
+    fn visit_decl(&mut self, _decl: &mut Decl) -> Self::Result {
         // match decl {
         //     Decl::Fn(f) => self.infer_fn(f)?,
         //     Decl::TyDecl(TyDecl::Struct(s)) => Self::infer_struct(s),
@@ -1060,6 +1111,7 @@ impl Visitor for TypeSubstitutor {
                 ..
             } => {
                 vardef.ty = self.subst(&vardef.ty);
+                self.subst_block(body);
                 self.subst_expr(&mut vardef.init);
             }
             Stmt::If {
@@ -1106,7 +1158,6 @@ impl Visitor for TypeSubstitutor {
                 self.subst_expr(lhs);
                 self.subst_expr(rhs);
             }
-            ExprKind::Var(ref var) => todo!(),
             ExprKind::Logical {
                 ref mut lhs,
                 op: _,
@@ -1157,7 +1208,7 @@ impl Visitor for TypeSubstitutor {
             } => members
                 .iter_mut()
                 .for_each(|member| self.subst_expr(&mut member.init)),
-            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This(_) => {}
+            ExprKind::Path(_) | ExprKind::Lit(_) | ExprKind::This(_) | ExprKind::Var(_) => {}
         }
         expr.ty = self.subst(&expr.ty);
     }

@@ -1,8 +1,5 @@
 #![feature(box_syntax, box_patterns)]
 #![warn(clippy::pendantic)]
-#![allow(unused_imports)]
-#![allow(unused_variables)]
-#![allow(dead_code)]
 use std::path::PathBuf;
 
 #[macro_use]
@@ -23,8 +20,6 @@ mod typer;
 extern crate failure;
 
 use self::session::*;
-
-use clap::*;
 
 const STEGI_ASCII: &str = r#"
  _________________________________________

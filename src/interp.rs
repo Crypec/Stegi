@@ -1,6 +1,5 @@
 use crate::ast::*;
 
-use std::cell::RefCell;
 use std::convert::From;
 use std::fmt;
 
@@ -10,7 +9,6 @@ use crate::errors::*;
 use crate::lexer::Lit;
 use std::collections::HashMap;
 
-use crate::ast::*;
 use crate::cxt::Cxt;
 
 macro_rules! cast(
@@ -204,10 +202,6 @@ impl Interp {
     }
 
     fn assign(&mut self, target: &AssingKind, to: Value) -> Result<(), Diagnostic> {
-        let from = self
-            .cxt
-            .get(&target.base_var().lexeme)
-            .expect("Variable nicht definiert! Das ist vermutlich ein Fehler im Typenchecker!");
         let ptr = self.assign_match(target)?;
         *ptr = to;
         Ok(())
@@ -419,11 +413,11 @@ impl Interp {
 impl<'a> Visitor for Interp {
     type Result = Result<Option<Value>, Diagnostic>;
 
-    fn visit_decl(&mut self, d: &mut Decl) -> Self::Result {
+    fn visit_decl(&mut self, _: &mut Decl) -> Self::Result {
         todo!()
     }
 
-    fn visit_expr(&mut self, e: &mut Expr) -> Self::Result {
+    fn visit_expr(&mut self, _e: &mut Expr) -> Self::Result {
         todo!()
     }
 
@@ -440,7 +434,7 @@ impl<'a> Visitor for Interp {
                 ref mut body,
                 ref mut else_branches,
                 ref mut final_branch,
-                ref span,
+                span: _,
             } => {
                 if self.eval(cond)?.truthy() {
                     let ret = self.run_block(body)?;
@@ -466,7 +460,7 @@ impl<'a> Visitor for Interp {
             Stmt::For {
                 ref vardef,
                 ref mut body,
-                ref span,
+                span: _,
             } => {
                 self.cxt.push_scope();
                 let val = self.eval(&vardef.init)?;
@@ -493,7 +487,7 @@ impl<'a> Visitor for Interp {
             Stmt::While {
                 ref cond,
                 ref mut body,
-                ref span,
+                span: _,
             } => {
                 while self.eval(cond)?.truthy() {
                     let ret = self.run_block(body)?;
@@ -506,7 +500,7 @@ impl<'a> Visitor for Interp {
             Stmt::Assign {
                 ref target,
                 ref rhs,
-                ref span,
+                span: _,
             } => {
                 let rhs = self.eval(rhs)?;
                 self.assign(&target.kind, rhs)?;

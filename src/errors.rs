@@ -4,7 +4,6 @@ use crate::ast::Span;
 use crate::lexer::TokenKind;
 use crate::session::SourceMap;
 use crate::typer::Ty;
-use crate::typer::TyKind;
 
 use colored::*;
 
