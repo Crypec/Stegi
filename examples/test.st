@@ -10,5 +10,5 @@ fun fib(n: Zahl) -> Zahl {
 }
 
 fun Start() {
-	fib(3)
+	#ausgabe("{}", fib(20))
 }

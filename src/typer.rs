@@ -729,7 +729,9 @@ impl TyConsGenPass {
                 }),
                 Intrinsic::Print | Intrinsic::Write => Ok(Ty::default_unit_type(e.span)),
             },
-            ExprKind::Field(ref callee, ref field) => todo!(),
+            ExprKind::Field(ref callee, ref field) => {
+                todo!();
+            }
         }
     }
 

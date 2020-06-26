@@ -444,8 +444,10 @@ impl<'a> Visitor for Interp {
                 } else {
                     for branch in else_branches.iter_mut() {
                         if self.eval(&branch.cond)?.truthy() {
-                            self.run_block(&mut branch.body)?;
-                            return Ok(None);
+                            let ret = self.run_block(&mut branch.body)?;
+                            if let Some(_) = ret {
+                                return Ok(ret);
+                            }
                         }
                     }
                     if let Some(fb) = final_branch {

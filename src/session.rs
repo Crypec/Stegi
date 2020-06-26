@@ -50,7 +50,6 @@ impl Driver {
             .for_each(|diag| println!("{}", diag));
 
         self.sess.diagnostics.extend(Typer::new().infer(&mut ast));
-        dbg!(&ast);
         let had_err = self.sess.diagnostics.iter().any(|d| match d.kind {
             ErrKind::Runtime(_) | ErrKind::Syntax(_) | ErrKind::Type(_) | ErrKind::Internal(_) => {
                 true
