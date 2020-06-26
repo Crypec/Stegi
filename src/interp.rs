@@ -8,8 +8,12 @@ use dyn_fmt::*;
 use crate::errors::*;
 use crate::lexer::Lit;
 use std::collections::HashMap;
+use std::io::prelude::*;
 
 use crate::cxt::Cxt;
+use std::fs;
+use std::fs::File;
+use std::path::Path;
 
 macro_rules! cast(
     ($val:expr, $p:path) => {
@@ -401,11 +405,46 @@ impl Interp {
                         Arguments::new(&fmt_spec, args_eval.iter())
                     )))
                 }
-                _ => todo!(),
+                Intrinsic::Read => {
+                    let arg = args.first().unwrap();
+                    let p_str = cast!(self.eval(arg)?, Value::Text);
+                    let path = Path::new(&p_str);
+
+                    match fs::read_to_string(path) {
+                        Ok(content) => Ok(Value::Text(content)),
+                        Err(_) => Err(self.span_err(
+                            ErrKind::Runtime(RuntimeError::FileNotFound(p_str.clone())),
+                            arg.span,
+                        )),
+                    }
+                }
+                Intrinsic::Write => {
+                    let arg = args.first().unwrap();
+                    let p_str = cast!(self.eval(arg)?, Value::Text);
+                    let content = cast!(self.eval(&args[1])?, Value::Text);
+                    match File::create(&p_str) {
+                        Ok(mut f) => {
+                            f.write_all(&content.as_bytes());
+                            Ok(Value::Tup(Vec::new()))
+                        }
+                        Err(_) => Err(self.span_err(
+                            ErrKind::Runtime(RuntimeError::CantWriteFile(p_str)),
+                            arg.span,
+                        )),
+                    }
+                }
             },
             ExprKind::Var(ref var) | ExprKind::This(ref var) => {
                 Ok(self.cxt.get(&var.lexeme).unwrap().clone())
             }
+        }
+    }
+
+    fn span_err(&mut self, kind: ErrKind, span: Span) -> Diagnostic {
+        Diagnostic {
+            kind,
+            span,
+            suggestions: Vec::new(),
         }
     }
 }

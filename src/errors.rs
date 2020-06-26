@@ -106,11 +106,15 @@ impl fmt::Display for TypeErr {
 #[derive(Debug, Clone)]
 pub enum RuntimeError {
     OutOfBounds { index: isize, len: usize },
+    FileNotFound(String),
+    CantWriteFile(String),
 }
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self{
-            RuntimeError::OutOfBounds{index, len} => write!(f, "Du hast versucht auf einen Index außerhalb des Feldes zuzugreifen, die Länge des Feldes beträgt {}. Du hast versucht auf die Postition {} zuzugreifen!", len, index)
+            Self::OutOfBounds{index, len} => write!(f, "Du hast versucht auf einen Index außerhalb des Feldes zuzugreifen, die Länge des Feldes beträgt {}. Du hast versucht auf die Postition {} zuzugreifen!", len, index),
+				Self::FileNotFound(path) => write!(f, "Die Datei an der Stelle: {}, konnten wir nicht von der lesen!", path),
+			Self::CantWriteFile(path) => write!(f, "Die Datei an der Stelle: {}, konnten wir nicht auf schreiben!", path),
         }
     }
 }
