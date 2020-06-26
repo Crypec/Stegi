@@ -84,6 +84,8 @@ pub enum TypeErr {
     InvalidField(String, String),
     FieldNotFound { ty: Ty, field: String },
     GenericsMismatch(Ty, Ty),
+    NonStaticCall { ty_name: String, fn_name: String },
+    StaticFnNotFound { ty_name: String, fn_name: String },
 }
 
 impl fmt::Display for TypeErr {
@@ -98,6 +100,8 @@ impl fmt::Display for TypeErr {
 			TypeErr::MissingField(field) => write!(f, "Du hast vergessen dem Feld {} einen Wert zu geben!", field),
 			TypeErr::InvalidField(ty, field) => write!(f, "Der Datentyp: {} hat kein Feld mit dem Namen: {}!", ty, field),
 			TypeErr::GenericsMismatch(lhs, rhs) => write!(f, "An dieser Stelle haben wir {} erwartet, aber {} gefunden!", lhs, rhs),
+			TypeErr::NonStaticCall{ty_name, fn_name} => write!(f, "Die Funktion: {} des Datentypen {}, ist nicht statisch! Der 'selbst' Paramter ist fuer statische Funktionen nicht erlaubt!", fn_name, ty_name),
+			TypeErr::StaticFnNotFound{ty_name, fn_name} => write!(f, "Der Datentyp {} hat keine statische Funktion mit dem Namen {}!", ty_name, fn_name),
 
         } //torben
     }

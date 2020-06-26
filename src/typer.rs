@@ -293,6 +293,7 @@ impl TyLoweringPass {
 
 pub struct TyConsGenPass {
     cxt: Cxt<String, Ty>,
+    ty_table: HashMap<String, TyDecl>,
     subst: Vec<Ty>,
     cons: Vec<Constraint>,
     diagnostics: Vec<Diagnostic>,
@@ -302,6 +303,7 @@ impl TyConsGenPass {
     pub fn new() -> Self {
         Self {
             cons: Vec::new(),
+            ty_table: HashMap::new(),
             cxt: Cxt::new(),
             subst: Vec::new(),
             diagnostics: Vec::new(),
@@ -392,7 +394,17 @@ impl TyConsGenPass {
         self.subst[i].clone()
     }
 
+    fn fill_ty_table(&mut self, ast: &AST) {
+        for node in ast {
+            if let Decl::TyDecl(t) = node {
+                self.ty_table.insert(t.name().lexeme.clone(), t.clone());
+            }
+        }
+    }
+
     pub fn gen(&mut self, ast: &mut AST) -> (Vec<Ty>, Vec<Diagnostic>) {
+        self.fill_ty_table(ast);
+
         for d in ast.iter() {
             match d {
                 Decl::TyDecl(TyDecl::Struct(s)) => self.cxt.insert_global(
@@ -645,16 +657,48 @@ impl TyConsGenPass {
                 })
             }
             ExprKind::Path(ref path) => {
-                let name = path.first().unwrap().lexeme.clone();
-                match path.len() {
-                    1 => match self.cxt.get(&name) {
-                        Some(tk) => Ok(tk.clone()),
-                        None => Err(self.span_err(
-                            ErrKind::Type(TypeErr::VarNotFound(name.clone())),
-                            path.span,
-                        )),
-                    },
-                    _ => todo!(),
+                if path.len() != 2 {
+                    return Err(self.span_err(ErrKind::Internal("Typenpfade mit mehr als 2 Segmenten um zum Beispiel #benuzte stmts zu ersetzen sind zum aktuellen Zeitpunkt noch nicht unterstuezt!".to_string()), path.span));
+                }
+                let ty_name = path.first().unwrap();
+                let fn_name = path.segments.get(1).unwrap();
+                match self.ty_table.get(&ty_name.lexeme) {
+                    Some(t) => {
+                        if let Some(fun) = t.get_method(&fn_name.lexeme) {
+                            if let Some(p) = fun.header.params.first() {
+                                if p.name.lexeme == "selbst" {
+                                    return Err(self.span_err(
+                                        ErrKind::Type(TypeErr::NonStaticCall {
+                                            ty_name: path.first().unwrap().lexeme.clone(),
+                                            fn_name: fn_name.lexeme.clone(),
+                                        }),
+                                        fn_name.span,
+                                    ));
+                                } else {
+                                    return Ok(Ty {
+                                        kind: fun.into(),
+                                        span: fn_name.span,
+                                    });
+                                }
+                            }
+                            Ok(Ty {
+                                kind: fun.into(),
+                                span: fn_name.span,
+                            })
+                        } else {
+                            Err(self.span_err(
+                                ErrKind::Type(TypeErr::StaticFnNotFound {
+                                    ty_name: ty_name.lexeme.clone(),
+                                    fn_name: fn_name.lexeme.clone(),
+                                }),
+                                fn_name.span,
+                            ))
+                        }
+                    }
+                    None => Err(self.span_err(
+                        ErrKind::Type(TypeErr::TyNotFound(path.first().unwrap().lexeme.clone())),
+                        path.first().unwrap().span,
+                    )),
                 }
             }
             ExprKind::Struct {

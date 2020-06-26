@@ -1,4 +1,19 @@
 
+typ Person {
+	name: Text,
+	alter: Zahl,
+}
+
+impl Person {
+	fun neu() -> Person {
+		rueckgabe Person {
+			name: "Simon",
+			alter: 18,
+		};
+	}
+}
+
+
 fun fib(n: Zahl) -> Zahl {
 	wenn n gleich 0 dann {
 		rueckgabe 0
@@ -11,4 +26,6 @@ fun fib(n: Zahl) -> Zahl {
 
 fun Start() {
 	#ausgabe("{}", fib(20))
+	ich := Person::neu()
+	#ausgabe("{}", ich);
 }

@@ -355,7 +355,17 @@ impl Interp {
                 let (_, obj) = cast!(self.eval(&callee)?, Value::Object);
                 Ok(obj.get(&name.lexeme).expect("Field not found!").clone())
             }
-            ExprKind::Path(ref p) => Ok(self.cxt.get(&p.first().unwrap().lexeme).unwrap().clone()),
+            ExprKind::Path(ref p) => {
+                let ty_name = &p.first().unwrap().lexeme;
+                let fn_name = &p.second().unwrap().lexeme;
+                Ok(Value::Fn(
+                    self.ty_table
+                        .get(ty_name)
+                        .unwrap()
+                        .get_method(fn_name)
+                        .unwrap(),
+                ))
+            }
             ExprKind::Array(ref elems) => {
                 let mut array = Vec::new();
                 for e in elems {

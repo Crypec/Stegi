@@ -233,6 +233,13 @@ pub struct FnDecl {
     pub span: Span,
 }
 
+impl Into<TyKind> for FnDecl {
+    fn into(self) -> TyKind {
+        let params = self.header.params.iter().map(|p| p.ty.clone()).collect();
+        TyKind::Fn(params, self.header.ret_ty)
+    }
+}
+
 #[derive(Clone, Derivative)]
 #[derivative(Debug)]
 pub enum Decl {
@@ -425,9 +432,12 @@ impl Path {
     }
 
     pub fn first(&self) -> Option<&Ident> {
-        self.segments.last()
+        self.segments.first()
     }
 
+    pub fn second(&self) -> Option<&Ident> {
+        self.segments.get(1)
+    }
     pub fn len(&self) -> usize {
         self.segments.len()
     }
