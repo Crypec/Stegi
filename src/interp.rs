@@ -463,11 +463,11 @@ impl<'a> Visitor for Interp {
     type Result = Result<Option<Value>, Diagnostic>;
 
     fn visit_decl(&mut self, _: &mut Decl) -> Self::Result {
-        todo!()
+        unreachable!()
     }
 
     fn visit_expr(&mut self, _e: &mut Expr) -> Self::Result {
-        todo!()
+        unreachable!()
     }
 
     fn visit_stmt(&mut self, s: &mut Stmt) -> Self::Result {

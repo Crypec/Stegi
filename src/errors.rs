@@ -232,6 +232,7 @@ impl UserDiagnostic {
     }
 
     fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
+        dbg!(self.span);
         let line_str = format!(" {} |", self.line_num());
 
         let align = line_str.len();

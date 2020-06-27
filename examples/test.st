@@ -21,11 +21,13 @@ fun fib(n: Zahl) -> Zahl {
 		rueckgabe 1
 	} sonst {
 		rueckgabe fib(n-1) + fib(n-2)
-	}
+        }
 }
 
 fun Start() {
-	#ausgabe("{}", fib(20))
-	ich := Person::neu()
-	#ausgabe("{}", ich);
+	a := 0 bis 10;
+	#ausgabe("{}", a)
+	fuer i := a {
+		#ausgabe("{}", i)
+	}
 }

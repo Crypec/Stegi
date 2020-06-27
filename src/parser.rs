@@ -93,25 +93,15 @@ impl Parser {
 
     fn sync_parser_state(&mut self) {
         loop {
+            dbg!(&self.peek_kind());
             if let Ok(tk) = self.peek_kind() {
                 match tk {
-                    // TokenKind::Semi => {
-                    //     self.advance().unwrap();
-                    //     if let Ok(TokenKind::RBrace) = self.peek_kind() {
-                    //         self.advance().unwrap();
-                    //     }
-                    //     return;
-                    // }
+                    TokenKind::Keyword(Keyword::Struct)
+                    | TokenKind::Keyword(Keyword::Fun)
+                    | TokenKind::Keyword(Keyword::Impl) => return,
                     TokenKind::EOF => {
                         return;
                     }
-                    TokenKind::Keyword(Keyword::Struct)
-                    | TokenKind::Keyword(Keyword::Fun)
-                    | TokenKind::Keyword(Keyword::For)
-                    // | TokenKind::Keyword(Keyword::If)
-                    // | TokenKind::Keyword(Keyword::While)
-                    // | TokenKind::Keyword(Keyword::Return)
-                    | TokenKind::Keyword(Keyword::Impl) => return,
                     _ => self.advance().unwrap(),
                 };
             }
@@ -250,7 +240,11 @@ impl Parser {
 
         let mut block = Vec::new();
         while self.peek_kind()? != TokenKind::RBrace {
-            block.push(self.parse_stmt(mode)?);
+            let stmt = self.parse_stmt(mode);
+            if let Err(_) = stmt {
+                self.expect(TokenKind::RBrace, "Block nicht geschlossen?")?;
+            }
+            block.push(stmt?)
         }
         let end = self
             .expect(TokenKind::RBrace, "Block nicht geschlossen?")?
