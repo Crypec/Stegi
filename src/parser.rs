@@ -344,14 +344,14 @@ impl Parser {
     }
 
     fn parse_elif_branch(&mut self, mode: BlockParsingMode) -> ParseResult<ElseBranch> {
-        let start = self.expect(TokenKind::Keyword(Keyword::Else), "An dieser Stelle haben wir das `sonst` Schlüsselwort erwartet! Mit diesem Schlüsselwort wissen wir was wir machen müssen wenn du nach einem primären `wenn`-Befehl noch weitere Bedingung zu beachten willst.")?.span;
+        let start = self.expect(TokenKind::Keyword(Keyword::Else), "An dieser Stelle haben wir das `sonst` Schlüsselwort erwartet! Mit diesem Schlüsselwort wissen wir, was wir machen müssen, wenn du nach einem primären `wenn`-Befehl noch weitere Bedingung zu beachten willst.")?.span;
         self.expect(TokenKind::Keyword(Keyword::If), "An dieser Stelle haben wir das `wenn`-Schlüsselwort erwartet. Mit dem `wenn`-Schlüsselwort kannst du feinere Entscheidungen nach einem `sonst`-Befehl hinzufügen.")?;
 
         let cond = self.parse_expr()?;
 
         self.expect(
             TokenKind::Keyword(Keyword::Then),
-            "Wenn du eine `Wenn-dann`-Abfrage machst, muss auf das `Wenn` immer ein `dann` folgen, so wissen wir, was wir machen müssen wenn das `wenn`-statement erfüllt ist,Einem `wenn` muss auch ein `dann` folgen!",//torben
+            "Wenn du eine `Wenn-dann`-Abfrage machst, muss auf das `Wenn` immer ein `dann` folgen, so wissen wir, was wir machen müssen wenn das `wenn`-statement erfüllt ist.Merke:Einem `wenn` muss auch ein `dann` folgen!",//torben
         )?;
         let body = self.parse_block(mode)?;
         let span = start.combine(&body.span.clone());
@@ -362,7 +362,7 @@ impl Parser {
         let start = self
             .expect(
                 TokenKind::Keyword(Keyword::Return),
-                "Wenn du etwas zuruückgeben willst musst du das Wort 'Rückgabe' benutzen, es zeigt uns was du zurückgeben willst! Das was du zurückgeben willst muss immer hinter 'Rückgabe'stehen. Als letztes kommt immer ein Semikolon `;`!",//torben
+                "Wenn du etwas zuruückgeben willst musst du das Wort `rückgabe` benutzen, es zeigt uns was du zurückgeben willst! Das was du zurückgeben willst muss immer hinter `rückgabe`stehen. Als letztes kommt immer ein Semikolon `;`!",//torben
             )?
             .span;
         let ret_val = match self.peek_kind()? {
@@ -460,12 +460,12 @@ impl Parser {
     fn parse_assign_index(&mut self, callee: AssingKind) -> ParseResult<AssingKind> {
         self.expect(
             TokenKind::LBracket,
-            "An dieser Stelle haben wir eine oeffnende Klammer erwartet!",
+            "An dieser Stelle haben wir eine öffnende eckige Klammer `[` erwartet!",
         )?;
         let index = self.parse_expr()?;
         self.expect(
             TokenKind::RBracket,
-            "An dieser Stelle haben wir eine schliessende Klammer erwartet!",
+            "An dieser Stelle haben wir eine schliessende  eckige Klammer `]` erwartet!",
         )?;
         Ok(AssingKind::Index {
             callee: box callee,
@@ -484,14 +484,14 @@ impl Parser {
         let target = self.parse_assing_target()?;
         self.expect(TokenKind::Eq, "Wir haben hier eine Gleichheitszeichen `=` erwartet. Du musst es benutzen um Zuordnungen zu machen.")?;
         let rhs = self.parse_expr()?;
-        self.expect(TokenKind::Semi, "Wir denken du hast hier das Semikolon `;` vergessen. Auc hier musst du es benutzen!")?;
+        self.expect(TokenKind::Semi, "Wir denken du hast hier das Semikolon `;` vergessen.")?;
         let span = target.span.combine(&rhs.span);
         Ok(Stmt::Assign { target, rhs, span })
     }
 %
     fn parse_expr_stmt(&mut self) -> ParseResult<Stmt> {
         let expr = self.parse_expr()?;
-        self.expect(TokenKind::Semi, "Nach einem Ausdruck musst du ein Seminkolon `;` setzten, so wissen wir das der Ausdruck zuende ist.")?;
+        self.expect(TokenKind::Semi, "Nach einem Ausdruck musst du ein Seminkolon `;` setzten, so wissen wir, dass der Ausdruck zuende ist.")?;
         Ok(Stmt::Expr(expr))
     }
 
@@ -501,7 +501,7 @@ impl Parser {
             return Err(self.span_err(ErrKind::Syntax(SyntaxErr::BreakOutsideLoop), span));
         }
         let start = self
-            .expect(TokenKind::Keyword(Keyword::Break), "Um aus der Schleife frühzeiig zu beenden brauchst du den `stop`-Befehl, so wissen wir das du an der Stelle aus der Schleife austreten möchtest!")?
+            .expect(TokenKind::Keyword(Keyword::Break), "Um die Schleife frühzeiig zu beenden, brauchst du den `stop`-Befehl, so wissen wir, dass du an der Stelle aus der Schleife austreten möchtest!")?
             .span;
         let end = self.expect(TokenKind::Semi, "Wir denken du hast hier das Semikolon `;` hinter dem `stop` vergessen.")?.span;
         Ok(Stmt::Break(start.combine(&end)))
@@ -514,9 +514,9 @@ impl Parser {
             return Err(self.span_err(ErrKind::Syntax(SyntaxErr::BreakOutsideLoop), span));
         }
         let start = self
-            .expect(TokenKind::Keyword(Keyword::Continue), "Wir denken du hast hier das Semikolon `;` hinter dem `continue` vergessen.")?
+            .expect(TokenKind::Keyword(Keyword::Continue), "Wir denken du hast hier Stichwort `weiter` vergessen.")?
             .span;
-        let end = self.expect(TokenKind::Semi, "weiter")?.span;
+        let end = self.expect(TokenKind::Semi, "Wir denken du hast hier das Semikolon `;` hinter dem `weiter` vergessen.")?.span;
         Ok(Stmt::Continue(start.combine(&end)))
     }
 
@@ -524,7 +524,7 @@ impl Parser {
         let start = self
             .expect(
                 TokenKind::Keyword(Keyword::Impl),
-                "Hier haben wir eine Implementierung erwartet. Schau was hier Implementiert wird und Implementiere das dann!",//torben
+                "Hier haben wir eine Implementierung erwartet. Schau, was hier Implementiert wird und Implementiere das dann!",//torben
             )?
             .span;
 
@@ -569,7 +569,7 @@ impl Parser {
 
     fn parse_struct(&mut self) -> ParseResult<Struct> {
         let start = self
-            .expect(TokenKind::Keyword(Keyword::Struct), "Hier haben wir eigentlich das Typenschlüsselwort `Typ` erwartet. Schau bitte dass, das du das hinzfügst.")?
+            .expect(TokenKind::Keyword(Keyword::Struct), "An dieser Stelle haben wir das Typenschlüsselwort `Typ` erwartet. Schau bitte dass, das du das hinzfügst.")?
             .span;
         let name = self.parse_ident()?;
 
@@ -579,7 +579,7 @@ impl Parser {
 
         while self.peek_kind()? != TokenKind::RBrace {
             let name = self.parse_ident()?;
-            self.expect(TokenKind::Colon, "Wir denken du hast den Namen deines Feldes vergessen. Schau bitte das du deinen Felder einen Namen gibst damit du es wieder findest.")?;
+            self.expect(TokenKind::Colon, "An dieser Stelle haben wir den Namen deines Feldes erwartet. Schau bitte, dass du deinem Feld einen Namen gibst, damit du es wieder findest.")?;
             let ty = self.parse_ty_specifier()?;
 
             fields.insert(name, ty);
@@ -659,7 +659,7 @@ impl Parser {
             TokenKind::LBracket => {
                 self.advance()?;
                 let ty = self.parse_ty_specifier()?;
-                self.expect(TokenKind::RBracket, "Wir denken du hast hier eine schließende eckige Klammer `]` vergessen.")?;
+                self.expect(TokenKind::RBracket, "An dieser Stelle haben wir eine schließende eckige Klammer `]` vergessen.")?;
                 Ok(TyKind::Array(Box::new(ty)))
             }
             TokenKind::LParen => {
@@ -835,7 +835,7 @@ impl Parser {
 
     fn parse_print(&mut self) -> ParseResult<Expr> {
         let start = self
-            .expect(TokenKind::Keyword(Keyword::Print), "An dieser Stelle haben wir das Ausgabeschlüsselwort `#ausgabe` erwartet. Schau bitte dass, das du das hinzufügst,damit wir wissen was wir Ausgeben müssen.")?
+            .expect(TokenKind::Keyword(Keyword::Print), "An dieser Stelle haben wir das Ausgabeschlüsselwort `#ausgabe` erwartet. Schau bitte dass, du das hinzufügst, damit wir wissen was wir Ausgeben müssen.")?
             .span;
         self.expect(
             TokenKind::LParen,
@@ -847,12 +847,12 @@ impl Parser {
             match self.peek_kind()? {
                 TokenKind::RParen => break,
                 _ => {
-                    self.expect(TokenKind::Comma, "Zwischen den einzelnen internistischen Funktionen erwarten wir ein Komma `,`. So können wir die einzelnen internistischen Funktionen auseinanderhalten.Auch bei intrinsichen Funktionen werden Argumente mit einem Komma getrennt!")?;
+                    self.expect(TokenKind::Comma, "Zwischen den einzelnen internistischen Funktionen erwarten wir ein Komma `,`. So können wir die einzelnen internistischen Funktionen auseinanderhalten. Achtung: Auch bei intrinsischen Funktionen werden Argumente mit einem Komma getrennt!")?;
                     args.push(self.parse_expr()?);
                 }
             }
         }
-        let end = self.expect(TokenKind::RParen, "Wir denken du hast hier eine schließende  Klammer ´)` nach dem Ausgabeschlüsselwort `#ausgabe`vergessen. Schau bitte nochmal über deinen Code und füge sie hinzu.")?.span;
+        let end = self.expect(TokenKind::RParen, "An dieser Stelle haben wir eine schließende  Klammer `)` nach dem Ausgabeschlüsselwort `#ausgabe`erwartet.")?.span;
         let span = start.combine(&end);
         Ok(Expr {
             node: ExprKind::Intrinsic {
@@ -871,7 +871,7 @@ impl Parser {
         let start = self
             .expect(
                 TokenKind::Keyword(Keyword::Read),
-                "Wir haben wir das Eingabeschlüsselwort `#eingabe` erwartet. Schau bitte dass, das du das hinzufügst, damit wir wissen was du eingeben willst.",
+                "An dieser Stelle haben wir das Eingabeschlüsselwort `#eingabe` erwartet. Schau bitte dass, das du das hinzufügst, damit wir wissen was du eingeben willst.",
             )?
             .span;
         self.expect(
@@ -903,7 +903,7 @@ impl Parser {
         let start = self
             .expect(
                 TokenKind::Keyword(Keyword::Read),
-                "Hier haben wir eigentlich das Eingabeschlüsselwort `#eingabe` erwartet. Schau bitte dass, das du das hinzufügst, damit wir wissen was du eingeben willst.",
+                "An dieser Stelle haben wir das Ausgabeschlüsselwort `#ausgabe` erwartet. Schau bitte dass, das du das hinzufügst, damit wir wissen was du ausgeben willst.",
             )?
             .span;
         self.expect(
@@ -913,7 +913,7 @@ impl Parser {
         let file_name = self.parse_expr()?;
         self.expect(
             TokenKind::Comma,
-            "Zwischen den einzelnen internistischen Funktionen erwarten wir ein Komma `,`. So können wir die einzelnen internistischen Funktionen auseinanderhalten.Auch die Argumente einer intrinsichen Funktion werden mit einem Komma getrennt.",
+            "Zwischen den einzelnen internistischen Funktionen erwarten wir ein Komma `,`. So können wir die einzelnen internistischen Funktionen auseinanderhalten. Achtung: Auch die Argumente einer intrinsichen Funktion werden mit einem Komma getrennt!",
         )?;
         let content = self.parse_expr()?;
         let end = self
@@ -944,7 +944,7 @@ impl Parser {
             let name = self.parse_ident()?;
             self.expect(
                 TokenKind::Colon,
-                "Wir denken du hast hier eine  Doppelpunkt `:` vergessen. Schau bitte nochmal über deinen Code und füge ihn hinzu, er gehört zwischen den Feldname und dem Ausdruck `init` des Feldes.",
+                "Zwischen dem Feldname und dem Ausdruck `init` erwarten wird ein  Doppelpunkt `:`. Schau bitte nochmal über deinen Code und füge ihn hinzu.",
             )?;
             let expr = self.parse_expr()?;
 
@@ -954,7 +954,7 @@ impl Parser {
 
             match self.peek_kind()? {
                 TokenKind::RBrace => break,
-                _ => self.expect(TokenKind::Comma, "Zwischen den einzelnen Typenliterale erwarten ein Komma `,`. So können wir die einzelnen Literale auseinanderhalten.literalfeld.")?,
+                _ => self.expect(TokenKind::Comma, "Zwischen den einzelnen Typenliterale erwarten ein Komma `,`. So können wir die einzelnen Literale auseinanderhalten.")?,
             };
         }
         let end = self
@@ -1048,7 +1048,7 @@ impl Parser {
             values.push(self.parse_expr()?);
             match self.peek_kind()? {
                 TokenKind::RParen => break,
-                _ => self.expect(TokenKind::Comma, "Zwischen den einzelnen Typenliterale erwarten ein Komma `,`. So können wir die einzelnen Literale auseinanderhalten.literalfeld.")?,
+                _ => self.expect(TokenKind::Comma, "Zwischen den einzelnen Typenliterale erwarten wir  ein Komma `,`. So können wir die einzelnen Literale auseinanderhalten..")?,
             };
         }
         let end = self.expect(TokenKind::RParen, "An dieser Stelle haben wir eine schließende Klammer `)` erwartet!")?.span;
@@ -1064,7 +1064,7 @@ impl Parser {
     }
 
     fn parse_arr(&mut self) -> ParseResult<Expr> {
-        let start = self.expect(TokenKind::LBracket, "Wir denken du hast hier eine eckige öffnende  Klammer `[` vergessen. Schau bitte nochmal über deinen Code und füge sie hinzu.")?.span;
+        let start = self.expect(TokenKind::LBracket, "Wir denken du hast hier eine eckige öffnende  Klammer `[` vergessen.")?.span;
         let mut values = Vec::new();
         while self.peek_kind()? != TokenKind::RBracket {
             values.push(self.parse_expr()?);
