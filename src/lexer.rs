@@ -1,5 +1,6 @@
 use std::fmt;
 use std::iter::*;
+use std::path::PathBuf;
 use std::str::Chars;
 use std::str::FromStr;
 
@@ -279,14 +280,16 @@ pub struct Lexer<'a> {
     iter: MultiPeek<Chars<'a>>,
     src_buf: &'a str,
     cursor: usize,
+    file: PathBuf,
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(data: &'a str) -> Self {
+    pub fn new(data: &'a str, file: PathBuf) -> Self {
         Lexer {
             iter: multipeek(data.chars()),
             src_buf: data,
             cursor: 0,
+            file,
         }
     }
     fn advance(&mut self) -> Option<char> {
@@ -456,7 +459,7 @@ impl<'a> Lexer<'a> {
 
     fn yield_span(&self, start: usize) -> Span {
         let end = start + self.cursor - 1;
-        Span::new(start, end)
+        Span::new(start, end, self.file.clone())
     }
 
     fn sub_string(&mut self, start: usize) -> String {
@@ -471,7 +474,7 @@ impl<'a> Lexer<'a> {
         }
         // consume trailing "
         self.advance();
-        let lit = self.sub_string(start);
+        let lit = self.src_buf[start + 1..self.cursor - 1].to_string();
         Ok(TokenKind::Lit(Lit::String(lit)))
     }
 

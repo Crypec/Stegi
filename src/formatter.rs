@@ -1,3 +1,4 @@
+use crate::ast::Path;
 use crate::ast::*;
 use crate::lexer::Lit;
 use crate::typer::{Ty, TyKind};

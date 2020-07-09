@@ -199,7 +199,7 @@ impl Interp {
                     self.run_block(&mut f.body).unwrap();
                 }
                 // if !found_main {
-                //     self.span
+                //     self.span.clone()
                 // }
             }
         }
@@ -224,7 +224,7 @@ impl Interp {
                 } else {
                     Err(Diagnostic {
 						kind: ErrKind::Internal("Feld in Object nicht gefunden! Dieser Fehler haette eigentlich waehrend der Typenanalyse erkannt werden sollen!".to_string()),
-						span: name.span,
+						span: name.span.clone(),
 						suggestions: Vec::new(),
 					})
                 }
@@ -237,14 +237,14 @@ impl Interp {
                             index: idx,
                             len: arr.len(),
                         }),
-                        span: index.span,
+                        span: index.span.clone(),
                         suggestions: Vec::new(),
                     };
                     arr.get_mut(idx as usize).ok_or(err)
                 } else {
                     Err(Diagnostic {
 						kind: ErrKind::Internal("Objekt ist kein Array. Dieser Fehler sollte eigentlich waehrend der Typenanalyse erkannt werden!".to_string()),
-						span: index.span,
+						span: index.span.clone(),
 						suggestions: Vec::new(),
 					})
                 }
@@ -330,7 +330,7 @@ impl Interp {
                         });
                         return Err(Diagnostic{
 							kind,
-							span: e.span,
+							span: e.span.clone(),
 							suggestions: vec!["Du kannst versuchen mit einer extra Abfrage den Wert des index zu ueberpruefen!".to_string()],
 						});
                     }
@@ -383,6 +383,7 @@ impl Interp {
                     args_eval.push(self.eval(&arg)?);
                 }
                 debug_assert_eq!(fun.header.params.len(), args_eval.len());
+                dbg!(&args_eval);
                 self.cxt.push_frame();
                 for (p, arg) in fun.header.params.iter().zip(args_eval.iter()) {
                     self.cxt.insert(p.name.lexeme.clone(), arg.clone())
@@ -424,7 +425,7 @@ impl Interp {
                         Ok(content) => Ok(Value::Text(content)),
                         Err(_) => Err(self.span_err(
                             ErrKind::Runtime(RuntimeError::FileNotFound(p_str.clone())),
-                            arg.span,
+                            arg.span.clone(),
                         )),
                     }
                 }
@@ -439,7 +440,7 @@ impl Interp {
                         }
                         Err(_) => Err(self.span_err(
                             ErrKind::Runtime(RuntimeError::CantWriteFile(p_str)),
-                            arg.span,
+                            arg.span.clone(),
                         )),
                     }
                 }

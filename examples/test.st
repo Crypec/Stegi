@@ -1,17 +1,21 @@
-
-typ Person {
+Typ Person {
 	name: Text,
 	alter: Zahl,
 }
 
 impl Person {
-	fun neu() -> Person {
-		rueckgabe Person {
-			name: "Simon",
-			alter: 18,
-		};
+	// fun neu() -> Person {
+	// 	rueckgabe Person {
+	// 		name: "Simon",
+	// 		alter: 18,
+	//          };
+	// }
+
+	fun darf_fahren(foo: Zahl) -> Bool {
+		rueckgabe foo >= 18;
 	}
 }
+
 
 
 fun fib(n: Zahl) -> Zahl {
@@ -21,13 +25,13 @@ fun fib(n: Zahl) -> Zahl {
 		rueckgabe 1
 	} sonst {
 		rueckgabe fib(n-1) + fib(n-2)
-        }
+    }
 }
 
 fun Start() {
-	a := 0 bis 10;
-	#ausgabe("{}", a)
-	fuer i := a {
-		#ausgabe("{}", i)
+	simon := Person::neu()
+	#ausgabe("{}", simon)
+	fuer b := 0 bis 10 {
+		#ausgabe("{}", b)
 	}
 }

@@ -2,8 +2,7 @@ use std::fmt;
 
 use crate::ast::Span;
 use crate::lexer::TokenKind;
-use crate::session::SourceMap;
-use crate::typer::Ty;
+use crate::typer::{Ty, TyKind};
 
 use colored::*;
 
@@ -76,23 +75,40 @@ impl fmt::Display for SyntaxErr {
 pub enum TypeErr {
     VarNotFound(String),
     TyNotFound(String),
-    InvalidType(Ty, Ty),
+    InvalidType {
+        expected: TyKind,
+        actual: Ty,
+    },
     // TODO(Simon): this should really be a ty instead of just a tykind, we need the span to do proper error reporting
     InfRec(Ty, Ty),
     DuplicateLitField(String),
     MissingField(String),
     InvalidField(String, String),
-    FieldNotFound { ty: Ty, field: String },
+    FieldNotFound {
+        ty: TyKind,
+        field: String,
+    },
     GenericsMismatch(Ty, Ty),
-    NonStaticCall { ty_name: String, fn_name: String },
-    StaticFnNotFound { ty_name: String, fn_name: String },
+    NonStaticCall {
+        ty_name: String,
+        fn_name: String,
+    },
+    StaticFnNotFound {
+        ty_name: String,
+        fn_name: String,
+    },
+    Parity {
+        name: String,
+        expected: usize,
+        actual: usize,
+    },
 }
 
 impl fmt::Display for TypeErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self{
             TypeErr:: VarNotFound(varname) => write!(f, "Diese Variable `{}` haben wir nicht gefunden. Bitte Definiere und Initialisiere sie, bevor du sie benutzt.", varname),
-            TypeErr::InvalidType(expected, actual)=> write!(f, "Du hast hier einen Typ benutzt der entweder gar nicht existiert oder hier nicht funktioniert. Bitte schau da nochmal drüber. Erwartet: {} => Gefunden: {}", expected, actual),
+            TypeErr::InvalidType{expected, actual}=> write!(f, "Du hast hier einen Typ benutzt der entweder gar nicht existiert oder hier nicht funktioniert. Bitte schau da nochmal drüber. Erwartet: {} => Gefunden: {}", expected, actual),
             TypeErr::InfRec(a, b) => write!(f, "Unendlich rekursiver Typ entdeckt! Typ: {}, kommt in {} vor!!!", a, b),
             TypeErr::FieldNotFound{ty, field} => write!(f, "Der Datentyp {} hat kein Feld mit dem Namen {}!", ty, field),
 			TypeErr::TyNotFound(t) => write!(f, "Keine Defintion fuer den Datentyp {} gefunden", t),
@@ -102,6 +118,7 @@ impl fmt::Display for TypeErr {
 			TypeErr::GenericsMismatch(lhs, rhs) => write!(f, "An dieser Stelle haben wir {} erwartet, aber {} gefunden!", lhs, rhs),
 			TypeErr::NonStaticCall{ty_name, fn_name} => write!(f, "Die Funktion: {} des Datentypen {}, ist nicht statisch! Der 'selbst' Paramter ist fuer statische Funktionen nicht erlaubt!", fn_name, ty_name),
 			TypeErr::StaticFnNotFound{ty_name, fn_name} => write!(f, "Der Datentyp {} hat keine statische Funktion mit dem Namen {}!", ty_name, fn_name),
+			TypeErr::Parity{ref name, expected, actual} => write!(f, "Die Anzahl der Argumente fuer die Funktion {} stimmt nicht mit der in der Definition angegebenden ueberein. Erwartet: {} => Gefunden: {}", name, expected, actual),
 
         } //torben
     }
@@ -151,136 +168,115 @@ impl Diagnostic {
     pub fn add_suggestion<S: Into<String>>(&mut self, sug: S) {
         self.suggestions.push(sug.into());
     }
-}
-
-#[derive(Debug)]
-pub struct UserDiagnostic {
-    pub src_map: SourceMap,
-    pub kind: ErrKind,
-    pub suggestions: Vec<String>,
-    pub span: Span,
-}
-
-impl UserDiagnostic {
-    pub fn new(diag: Diagnostic, src_map: SourceMap) -> Self {
-        // TODO(Simon): there may be a better way to copy the data from Diagnostic into UserDiagnostic
-        Self {
-            src_map,
-            kind: diag.kind,
-            suggestions: diag.suggestions,
-            span: diag.span,
-        }
-    }
 
     fn underline(&self) -> String {
         let buf_len = self.span.hi - self.span.lo;
         (0..=buf_len).map(|_| "^").collect::<String>()
     }
 
-    fn span_snippet(&self) -> String {
-        let s = self.line_span();
-        let buf = &self.src_map.buf;
-        buf[s.lo..s.hi].trim_start().to_string()
-    }
+    // fn span_snippet(&self) -> String {
+    //     let s = self.line_span();
+    //     let buf = &self.src_map.buf;
+    //     buf[s.lo..s.hi].trim_start().to_string()
+    // }
 
-    fn line_span(&self) -> Span {
-        // FIXME(Simon): I haven't tested this, but it seems like this is going to work only on linux with the current solution
-        // FIXME(Simon): because windows uses not only a '\n' as a newline char but combines it with a '\r'
-        let mut line_offsets = vec![0];
-        line_offsets.extend(
-            self.src_map
-                .buf
-                .char_indices()
-                .filter(|(_, c)| *c == '\n')
-                .map(|(i, _)| i)
-                .collect::<Vec<usize>>(),
-        );
-        /*
-        assert!(
-            self.span.hi <= *line_offsets.last().unwrap(),
-            "`hi` marker of span is outside of file"
-        );
-        */
+    // fn line_span(&self) -> Span {
+    //     // FIXME(Simon): I haven't tested this, but it seems like this is going to work only on linux with the current solution
+    //     // FIXME(Simon): because windows uses not only a '\n' as a newline char but combines it with a '\r'
+    //     let mut line_offsets = vec![0];
+    //     line_offsets.extend(
+    //         self.src_map
+    //             .buf
+    //             .char_indices()
+    //             .filter(|(_, c)| *c == '\n')
+    //             .map(|(i, _)| i)
+    //             .collect::<Vec<usize>>(),
+    //     );
+    //     /*
+    //     assert!(
+    //         self.span.hi <= *line_offsets.last().unwrap(),
+    //         "`hi` marker of span is outside of file"
+    //     );
+    //     */
+    //     let mut it = line_offsets.into_iter().peekable();
+    //     let mut lo = 0;
+    //     while let Some(offset) = it.next() {
+    //         if offset == self.span.lo || *it.peek().unwrap() >= self.span.lo {
+    //             lo = offset;
+    //             break;
+    //         }
+    //     }
+    //     let hi = it.next().unwrap();
+    //     let (lo, _) = self
+    //         .src_map
+    //         .buf
+    //         .char_indices()
+    //         .skip(lo)
+    //         .find(|(_, c)| !c.is_whitespace())
+    //         .unwrap();
+    //     Span::new(lo, hi, self.src_map.path)
+    // }
 
-        let mut it = line_offsets.into_iter().peekable();
-        let mut lo = 0;
-        while let Some(offset) = it.next() {
-            if offset == self.span.lo || *it.peek().unwrap() >= self.span.lo {
-                lo = offset;
-                break;
-            }
-        }
-        let hi = it.next().unwrap();
-        let (lo, _) = self
-            .src_map
-            .buf
-            .char_indices()
-            .skip(lo)
-            .find(|(_, c)| !c.is_whitespace())
-            .unwrap();
-        Span::new(lo, hi)
-    }
+    // fn line_num(&self) -> usize {
+    //     self.src_map
+    //         .buf
+    //         .char_indices()
+    //         .filter(|(_, c)| *c == '\n')
+    //         .position(|(i, _)| i >= self.span.lo)
+    //         .expect("failed to compute line number of err")
+    //         + 1
+    // }
 
-    fn line_num(&self) -> usize {
-        self.src_map
-            .buf
-            .char_indices()
-            .filter(|(_, c)| *c == '\n')
-            .position(|(i, _)| i >= self.span.lo)
-            .expect("failed to compute line number of err")
-            + 1
-    }
+    // fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
+    //     dbg!(self.span);
+    //     let line_str = format!(" {} |", self.line_num());
 
-    fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
-        dbg!(self.span);
-        let line_str = format!(" {} |", self.line_num());
+    //     let align = line_str.len();
+    //     let u_line = self.underline();
 
-        let align = line_str.len();
-        let u_line = self.underline();
-
-        writeln!(f, "{:>a$}", "|", a = align)?;
-        writeln!(f, "{} {}", line_str, self.span_snippet())?;
-        writeln!(
-            f,
-            "{:>a$} {:>u$}",
-            "|",
-            u_line.color(c).bold(),
-            a = align,
-            u = self.span.lo - self.line_span().lo + u_line.len()
-        )?;
-        writeln!(
-            f,
-            "{:>a$} {}: {}",
-            "|",
-            "Hilfe".bold().underline(),
-            self.kind,
-            a = align
-        )
-    }
+    //     writeln!(f, "{:>a$}", "|", a = align)?;
+    //     writeln!(f, "{} {}", line_str, self.span_snippet())?;
+    //     writeln!(
+    //         f,
+    //         "{:>a$} {:>u$}",
+    //         "|",
+    //         u_line.color(c).bold(),
+    //         a = align,
+    //         u = self.span.lo - self.line_span().lo + u_line.len()
+    //     )?;
+    //     writeln!(
+    //         f,
+    //         "{:>a$} {}: {}",
+    //         "|",
+    //         "Hilfe".bold().underline(),
+    //         self.kind,
+    //         a = align
+    //     )
+    // }
 }
 
-impl fmt::Display for UserDiagnostic {
+impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let color = match self.kind {
-            ErrKind::Warning { .. } => Color::Yellow,
-            ErrKind::Internal(_) => Color::BrightMagenta,
-            _ => Color::Red,
-        };
-        let msg = format!("{}", self.kind).color(color).bold();
-        writeln!(
-            f,
-            "{} {} {}[{}]",
-            "--".bold(),
-            msg,
-            "------------------------------------------".bold(),
-            self.src_map.path.to_str().unwrap().blue()
-        )?;
-        writeln!(f)?;
-        self.write_code_snippet(f, color)?;
-        writeln!(f, "")?;
-        for sug in &self.suggestions {
-            writeln!(f, " • {}", sug)?;
-        }
-        write!(f, "")
+        // let color = match self.kind {
+        //     ErrKind::Warning { .. } => Color::Yellow,
+        //     ErrKind::Internal(_) => Color::BrightMagenta,
+        //     _ => Color::Red,
+        // };
+        // let msg = format!("{}", self.kind).color(color).bold();
+        // writeln!(
+        //     f,
+        //     "{} {} {}[{}]",
+        //     "--".bold(),
+        //     msg,
+        //     "------------------------------------------".bold(),
+        //     self.src_map.path.to_str().unwrap().blue()
+        // )?;
+        // writeln!(f)?;
+        // self.write_code_snippet(f, color)?;
+        // writeln!(f, "")?;
+        // for sug in &self.suggestions {
+        //     writeln!(f, " • {}", sug)?;
+        // }
+        write!(f, "{:#?}", self)
     }
 }

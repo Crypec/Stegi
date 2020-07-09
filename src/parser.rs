@@ -1,6 +1,8 @@
+use crate::ast::Path;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::iter::*;
+use std::path::PathBuf;
 use std::vec::IntoIter;
 
 use itertools::multipeek;
@@ -16,6 +18,7 @@ type ParseResult<T> = Result<T, Diagnostic>;
 pub struct Parser {
     iter: MultiPeek<IntoIter<Token>>,
     last: Option<Token>,
+    file: PathBuf,
 }
 
 /// `FnParsingMode` tells the `parse_fn_decl()` if we are allowed to have a `self` param in the function signature.
@@ -49,7 +52,7 @@ macro_rules! __bin_op_rule (
 					_ => break,
 				};
 				let rhs = self.$inner()?;
-				let span = lhs.span.combine(&rhs.span);
+				let span = lhs.span.clone().combine(&rhs.span.clone());
 				let op: $conv = op.try_into()?;
 				lhs = Expr {
 					node: ExprKind::$kind{
@@ -81,13 +84,14 @@ macro_rules! binary_impl (
 );
 
 impl Parser {
-    pub fn new(i: Vec<Token>) -> Self {
+    pub fn new(i: Vec<Token>, file: &PathBuf) -> Self {
         let last = i.last().cloned();
         Parser {
             iter: multipeek(i.into_iter()),
             // NOTE(Simon): this only gets used for error reporting if we unexpectedly reach the end of a file
             // NOTE(Simon): this could be `None`, but in this we don't ever try to parse anything beecause `has_next` in our iter implementation will return false and we will stop parsing
             last,
+            file: file.clone(),
         }
     }
 
@@ -130,7 +134,7 @@ impl Parser {
                     expected,
                     actual: t.kind,
                 });
-                Err(self.span_err(kind, t.span))
+                Err(self.span_err(kind, t.span.clone()))
             }
         }
     }
@@ -140,7 +144,7 @@ impl Parser {
             TokenKind::LBrace => Ok(TyDecl::Struct(self.parse_struct()?)),
             TokenKind::Eq => Ok(TyDecl::Enum(self.parse_enum()?)),
             _ => {
-                let span = self.last.as_ref().unwrap().span;
+                let span = self.last.as_ref().unwrap().span.clone();
                 let kind = ErrKind::Syntax(SyntaxErr::MissingToken {
                     expected: vec![TokenKind::LBrace, TokenKind::Eq],
                     actual: self.look_ahead(3)?,
@@ -156,7 +160,8 @@ impl Parser {
                 TokenKind::Keyword(Keyword::Fun),
                 "An dieser Stelle haben wir das `fun` Schluesselwort erwartet!",
             )?
-            .span;
+            .span
+            .clone();
 
         let name = self.parse_ident()?;
         self.expect(
@@ -170,13 +175,16 @@ impl Parser {
             FnParsingMode::Method(p) => {
                 if self.peek_kind()? == TokenKind::Keyword(Keyword::This) {
                     self.advance()?;
-                    let sp = p.span;
 
                     let self_ty = Ty {
-                        kind: TyKind::Path(p),
-                        span: sp,
+                        kind: TyKind::Path(p.clone()),
+                        span: p.span.clone(),
                     };
-                    params.push(Param::new(Ident::new("selbst".into(), sp), self_ty, sp));
+                    params.push(Param::new(
+                        Ident::new("selbst".into(), p.span.clone()),
+                        self_ty,
+                        p.span.clone(),
+                    ));
                     if self.peek_kind()? != TokenKind::RParen {
                         self.expect(TokenKind::Comma, "Nach dem `selbst` Parameter und den restlichen Parametern der Funktion haben wir ein Komma erwartet!")?;
                     }
@@ -184,7 +192,7 @@ impl Parser {
             }
             FnParsingMode::Function => {
                 if self.peek_kind()? == TokenKind::Keyword(Keyword::This) {
-                    let sp = self.advance()?.span;
+                    let sp = self.advance()?.span.clone();
                     return Err(self.span_err(ErrKind::Syntax(SyntaxErr::SelfOutsideImpl), sp));
                 }
             }
@@ -193,7 +201,11 @@ impl Parser {
             let p_name = self.parse_ident()?;
             self.expect(TokenKind::Colon, "Name und Typ eines Funktionsparameters werden durch einen `:` voneinander getrennt!")?;
             let p_ty = self.parse_ty_specifier()?;
-            let sp = p_name.span.clone().combine(&p_ty.span.clone());
+            let sp = p_name
+                .span
+                .clone()
+                .clone()
+                .combine(&p_ty.span.clone().clone());
             params.push(Param::new(p_name.clone(), p_ty.clone(), sp));
 
             match self.peek_kind()? {
@@ -210,11 +222,15 @@ impl Parser {
             }
             _ => {
                 // FIXME(Simon): fix the span if we manually insert the return type of the function
-                let sp = Span::new(closing.span.lo + 4, closing.span.hi + 6);
+                let sp = Span::new(
+                    closing.span.clone().lo + 4,
+                    closing.span.clone().hi + 6,
+                    self.file.clone(),
+                );
                 Ty::default_unit_type(sp)
             }
         };
-        let span = ret_ty.span.combine(&start);
+        let span = ret_ty.span.clone().combine(&start);
         Ok(FnSig {
             name,
             params,
@@ -226,7 +242,7 @@ impl Parser {
     fn parse_fn(&mut self, parse_mode: FnParsingMode) -> ParseResult<FnDecl> {
         let header = self.parse_fn_header(parse_mode)?;
         let body = self.parse_block(BlockParsingMode::Normal)?;
-        let span = header.span.combine(&body.span);
+        let span = header.span.clone().combine(&body.span.clone());
         Ok(FnDecl { header, body, span })
     }
 
@@ -236,7 +252,8 @@ impl Parser {
                 TokenKind::LBrace,
                 "Geschweifte Klammer { vor Block erwartet",
             )?
-            .span;
+            .span
+            .clone();
 
         let mut block = Vec::new();
         while self.peek_kind()? != TokenKind::RBrace {
@@ -248,7 +265,8 @@ impl Parser {
         }
         let end = self
             .expect(TokenKind::RBrace, "Block nicht geschlossen?")?
-            .span;
+            .span
+            .clone();
         Ok(Block::new(block, start.combine(&end)))
     }
 
@@ -272,11 +290,12 @@ impl Parser {
     fn parse_while_loop(&mut self) -> ParseResult<Stmt> {
         let start = self
             .expect(TokenKind::Keyword(Keyword::While), "Solange")?
-            .span;
+            .span
+            .clone();
         let cond = self.parse_expr()?;
 
         let body = self.parse_block(BlockParsingMode::Loop)?;
-        let end = body.span;
+        let end = body.span.clone();
         Ok(Stmt::While {
             cond,
             body,
@@ -285,17 +304,20 @@ impl Parser {
     }
 
     fn parse_for_loop(&mut self) -> ParseResult<Stmt> {
-        let start = self.expect(TokenKind::Keyword(Keyword::For), "Fuer")?.span;
+        let start = self
+            .expect(TokenKind::Keyword(Keyword::For), "Fuer")?
+            .span
+            .clone();
 
         let vardef = self.parse_vardef()?;
 
         let body = self.parse_block(BlockParsingMode::Loop)?;
-        let span = start.combine(&body.span);
+        let span = start.combine(&body.span.clone());
         Ok(Stmt::For { vardef, body, span })
     }
 
     fn parse_if(&mut self, mode: BlockParsingMode) -> ParseResult<Stmt> {
-        let start = self.expect(TokenKind::Keyword(Keyword::If), "An dieser Stelle haben wir das `wenn` Schluesselwort erwartet. Mit `wenn` kann dein Programm Entscheidungen treffen. Der Programmtext innerhalb des Koerpers des `wenn` Befehls wird nur dann ausgefuehrt wenn sich seine Bedingung bewahrheitet!")?.span;
+        let start = self.expect(TokenKind::Keyword(Keyword::If), "An dieser Stelle haben wir das `wenn` Schluesselwort erwartet. Mit `wenn` kann dein Programm Entscheidungen treffen. Der Programmtext innerhalb des Koerpers des `wenn` Befehls wird nur dann ausgefuehrt wenn sich seine Bedingung bewahrheitet!")?.span.clone();
         let cond = self.parse_expr()?;
 
         self.expect(
@@ -315,21 +337,21 @@ impl Parser {
         }
 
         let final_branch = if self.peek_kind()? == TokenKind::Keyword(Keyword::Else) {
-            let start = self.advance()?.span;
+            let start = self.advance()?.span.clone();
             let body = self.parse_block(mode)?;
-            let sp = start.combine(&body.span.clone());
+            let sp = start.combine(&body.span.clone().clone());
             Some(FinalBranch { body, span: sp })
         } else {
             None
         };
 
         let span = match final_branch {
-            Some(ref b) => start.combine(&b.span.clone()),
+            Some(ref b) => start.combine(&b.span.clone().clone()),
             None => {
                 if !else_branches.is_empty() {
-                    start.combine(&else_branches.last().unwrap().span)
+                    start.combine(&else_branches.last().unwrap().span.clone())
                 } else {
-                    start.combine(&body.span.clone())
+                    start.combine(&body.span.clone().clone())
                 }
             }
         };
@@ -344,7 +366,7 @@ impl Parser {
     }
 
     fn parse_elif_branch(&mut self, mode: BlockParsingMode) -> ParseResult<ElseBranch> {
-        let start = self.expect(TokenKind::Keyword(Keyword::Else), "An dieser Stelle haben wir das `sonst` Schluesselwort erwartet! Es erlaubt dir nach einem primaeren `wenn` Befehl noch weitere Bedingung zu beachten.")?.span;
+        let start = self.expect(TokenKind::Keyword(Keyword::Else), "An dieser Stelle haben wir das `sonst` Schluesselwort erwartet! Es erlaubt dir nach einem primaeren `wenn` Befehl noch weitere Bedingung zu beachten.")?.span.clone();
         self.expect(TokenKind::Keyword(Keyword::If), "An dieser Stelle haben wir das `wenn` Schluesselwort erwartet! Es erlaubt dir feinere Entscheidungen nach einem `sonst` Befehl zu treffen")?;
 
         let cond = self.parse_expr()?;
@@ -354,7 +376,7 @@ impl Parser {
             "Wenn du eine 'Wenn-dann'-Abfrage machst, muss auf das 'Wenn' immer ein 'dann' folgen, so wissen wir, was wir machen müssen wenn das 'wenn'-statement erfüllt ist,Einem `wenn` muss auch ein `dann` folgen!",//torben
         )?;
         let body = self.parse_block(mode)?;
-        let span = start.combine(&body.span.clone());
+        let span = start.combine(&body.span.clone().clone());
         Ok(ElseBranch { cond, body, span })
     }
 
@@ -364,14 +386,14 @@ impl Parser {
                 TokenKind::Keyword(Keyword::Return),
                 "Wenn du etwas zuruückgeben willst musst du das Wort 'Rückgabe' benutzen, es zeigt uns was du zurückgeben willst! Das was du zurückgeben willst muss immer hinter 'Rückgabe'stehen. Als letztes kommt immer ein Semikolon(;)! Rueckgabe schluesselwort",//torben
             )?
-            .span;
+            .span.clone();
         let ret_val = match self.peek_kind()? {
-            TokenKind::Semi => Expr::empty(start),
+            TokenKind::Semi => Expr::empty(start.clone()),
             _ => self.parse_expr()?,
         };
         let end = self
             .expect(TokenKind::Semi, "Wenn du etwas zurückgeben willst musst du immer ein Semikolon `;` dahinter schreiben!(; nach rueckgabe erwartet)")?//Torben
-            .span;
+            .span.clone();
         Ok(Stmt::Ret(ret_val, start.combine(&end)))
     }
 
@@ -383,7 +405,7 @@ impl Parser {
                 TokenKind::Eq => return Ok(Directive::Assign),
                 TokenKind::Semi => return Ok(Directive::Expr),
                 TokenKind::EOF => {
-                    let sp = self.last.as_ref().unwrap().span;
+                    let sp = self.last.as_ref().unwrap().span.clone();
                     return Err(self.span_err(ErrKind::Syntax(SyntaxErr::UnexpectedEOF), sp));
                 }
                 _ => i += 1,
@@ -396,7 +418,7 @@ impl Parser {
         let ty = match self.peek_kind()? {
             TokenKind::ColonEq => {
                 // user has not provided a type, we will try to infer it later during type inference
-                let span = self.advance()?.span;
+                let span = self.advance()?.span.clone();
                 Ty {
                     kind: TyKind::Infer,
                     span,
@@ -409,13 +431,16 @@ impl Parser {
             }
             _ => {
                 let pk = self.advance()?;
-                return Err(self.span_err(ErrKind::Syntax(SyntaxErr::InvalidVarDefTarget), pk.span));
+                return Err(self.span_err(
+                    ErrKind::Syntax(SyntaxErr::InvalidVarDefTarget),
+                    pk.span.clone(),
+                ));
             }
         };
 
         let init = self.parse_expr()?;
 
-        let span = pat.span.combine(&init.span);
+        let span = pat.span.clone().combine(&init.span.clone());
         Ok(VarDef {
             pat,
             init,
@@ -475,7 +500,7 @@ impl Parser {
 
     fn parse_assing_target(&mut self) -> ParseResult<AssingTarget> {
         let name = self.parse_ident()?;
-        let span = name.span.clone();
+        let span = name.span.clone().clone();
         let kind = self.parse_assing_kind(AssingKind::Var(name))?;
         Ok(AssingTarget { kind, span })
     }
@@ -485,7 +510,7 @@ impl Parser {
         self.expect(TokenKind::Eq, "Gleichheitszeichen")?;
         let rhs = self.parse_expr()?;
         self.expect(TokenKind::Semi, "Semicolon")?;
-        let span = target.span.combine(&rhs.span);
+        let span = target.span.clone().combine(&rhs.span.clone());
         Ok(Stmt::Assign { target, rhs, span })
     }
 
@@ -497,26 +522,28 @@ impl Parser {
 
     fn parse_break(&mut self, mode: BlockParsingMode) -> ParseResult<Stmt> {
         if mode == BlockParsingMode::Normal {
-            let span = self.advance()?.span;
+            let span = self.advance()?.span.clone();
             return Err(self.span_err(ErrKind::Syntax(SyntaxErr::BreakOutsideLoop), span));
         }
         let start = self
             .expect(TokenKind::Keyword(Keyword::Break), "Stop befehl")?
-            .span;
-        let end = self.expect(TokenKind::Semi, "Stop")?.span;
+            .span
+            .clone();
+        let end = self.expect(TokenKind::Semi, "Stop")?.span.clone();
         Ok(Stmt::Break(start.combine(&end)))
     }
 
     fn parse_continue(&mut self, mode: BlockParsingMode) -> ParseResult<Stmt> {
         if mode == BlockParsingMode::Normal {
-            let span = self.advance()?.span;
+            let span = self.advance()?.span.clone();
             // FIXME(Simon): generate correct error for continue
             return Err(self.span_err(ErrKind::Syntax(SyntaxErr::BreakOutsideLoop), span));
         }
         let start = self
             .expect(TokenKind::Keyword(Keyword::Continue), "weiter befehl")?
-            .span;
-        let end = self.expect(TokenKind::Semi, "weiter")?.span;
+            .span
+            .clone();
+        let end = self.expect(TokenKind::Semi, "weiter")?.span.clone();
         Ok(Stmt::Continue(start.combine(&end)))
     }
 
@@ -526,7 +553,7 @@ impl Parser {
                 TokenKind::Keyword(Keyword::Impl),
                 "Hier haben wir eine Implementierung erwartet. Schau was hier Implementiert wird, und Implementiere da dann.An dieser Stelle haben wir das Impl Schluesselwort erwartet!",//torben
             )?
-            .span;
+            .span.clone();
 
         let impl_target = self.parse_path()?;
 
@@ -543,7 +570,7 @@ impl Parser {
                     fn_decls.push(self.parse_fn(mode)?);
                 }
                 _ => {
-                    let sp = self.last.as_ref().unwrap().span;
+                    let sp = self.last.as_ref().unwrap().span.clone();
 
                     let expected = vec![TokenKind::Keyword(Keyword::Fun), TokenKind::RBrace];
                     let err = ErrKind::Syntax(SyntaxErr::MissingToken {
@@ -559,7 +586,7 @@ impl Parser {
                 TokenKind::RBrace,
                 "Wir denken, dass du an dieser Stelle vergessen hast eine schließende geschweifte Klamer ´}´ zu schreiben. Wir denken An dieser Stelle haben wir eine schliessende Klammer: `}` erwartet",//torben
             )?
-            .span;
+            .span.clone();
         Ok(Decl::Impl {
             target: impl_target,
             fn_decls,
@@ -570,7 +597,8 @@ impl Parser {
     fn parse_struct(&mut self) -> ParseResult<Struct> {
         let start = self
             .expect(TokenKind::Keyword(Keyword::Struct), "TypenDeclaration")?
-            .span;
+            .span
+            .clone();
         let name = self.parse_ident()?;
 
         let mut fields = HashMap::new();
@@ -589,7 +617,10 @@ impl Parser {
                 _ => self.expect(TokenKind::Comma, "feld")?,
             };
         }
-        let end = self.expect(TokenKind::RBrace, "TypenDeclaration")?.span;
+        let end = self
+            .expect(TokenKind::RBrace, "TypenDeclaration")?
+            .span
+            .clone();
         Ok(Struct {
             name,
             fields,
@@ -604,7 +635,8 @@ impl Parser {
                 TokenKind::Keyword(Keyword::Struct),
                 "enum or struct declaration",
             )?
-            .span;
+            .span
+            .clone();
         let name = self.parse_ident()?;
         self.expect(TokenKind::Eq, "EnumDecl")?;
         let mut variants = Vec::new();
@@ -619,8 +651,8 @@ impl Parser {
             };
         }
         let end = match variants.last() {
-            Some(v) => v.span,
-            None => name.span,
+            Some(v) => v.span.clone(),
+            None => name.span.clone(),
         };
         Ok(Enum {
             name,
@@ -642,13 +674,13 @@ impl Parser {
                         _ => elems.push(self.parse_ty_specifier()?),
                     };
                 }
-                let end = self.expect(TokenKind::RParen, "enum arm")?.span;
+                let end = self.expect(TokenKind::RParen, "enum arm")?.span.clone();
                 (VariantData::Val(elems), end)
             }
-            _ => (VariantData::Unit, name.span),
+            _ => (VariantData::Unit, name.span.clone()),
         };
         Ok(Variant {
-            span: name.span.combine(&end),
+            span: name.span.clone().combine(&end),
             ident: name,
             data,
         })
@@ -688,16 +720,16 @@ impl Parser {
                 Ok(TyKind::Poly(name))
             }
             _ => {
-                let sp = self.advance()?.span;
+                let sp = self.advance()?.span.clone();
                 Err(self.span_err(ErrKind::Syntax(SyntaxErr::ExpectedTy), sp))
             }
         }
     }
 
     fn parse_ty_specifier(&mut self) -> ParseResult<Ty> {
-        let start = self.last.as_ref().unwrap().span;
+        let start = self.last.as_ref().unwrap().span.clone();
         let kind = self.parse_ty_kind()?;
-        let end = self.last.as_ref().unwrap().span;
+        let end = self.last.as_ref().unwrap().span.clone();
         Ok(Ty {
             kind,
             span: start.combine(&end),
@@ -718,8 +750,8 @@ impl Parser {
                 _ => break,
             };
         }
-        let first = segments.first().unwrap().span;
-        let last = segments.last().unwrap().span;
+        let first = segments.first().unwrap().span.clone();
+        let last = segments.last().unwrap().span.clone();
 
         Ok(Path::new(segments, first.combine(&last)))
     }
@@ -763,13 +795,13 @@ impl Parser {
         if self.peek_kind()? == TokenKind::Operator(Operator::Range) {
             self.advance()?;
             let rhs = self.parse_or()?;
-            let span = lhs.span.combine(&rhs.span);
+            let span = lhs.span.clone().combine(&rhs.span.clone());
             return Ok(Expr {
                 node: ExprKind::Range(Box::new(lhs), Box::new(rhs)),
-                span,
+                span: span.clone(),
                 ty: Ty {
                     kind: TyKind::Infer,
-                    span,
+                    span: span.clone(),
                 },
             });
         }
@@ -781,7 +813,7 @@ impl Parser {
     //     if self.peek_kind()? == TokenKind::Eq {
     //         self.advance()?;
     //         let rhs = self.parse_expr()?;
-    //         let sp = lhs.span.clone().combine(&rhs.span);
+    //         let sp = lhs.span.clone().clone().combine(&rhs.span.clone());
     //         match lhs.node {
     //             ExprKind::Path(..)
     //             | ExprKind::Field(..)
@@ -793,7 +825,7 @@ impl Parser {
     //                 };
     //                 return Ok(Expr::new(node, sp));
     //             }
-    //             _ => return Err(self.span_err("Invalides Zuweisungsziel", &lhs.span)),
+    //             _ => return Err(self.span_err("Invalides Zuweisungsziel", &lhs.span.clone())),
     //         };
     //     }
     //     Ok(lhs)
@@ -804,16 +836,16 @@ impl Parser {
             TokenKind::Operator(Operator::Not) | TokenKind::Operator(Operator::Minus) => {
                 let op = self.advance()?;
                 let rhs = self.parse_unary()?;
-                let span = op.span.combine(&rhs.span);
+                let span = op.span.clone().combine(&rhs.span.clone());
                 Ok(Expr {
                     node: ExprKind::Unary {
                         rhs: Box::new(rhs),
                         op: op.try_into()?,
                     },
-                    span,
+                    span: span.clone(),
                     ty: Ty {
                         kind: TyKind::Infer,
-                        span,
+                        span: span.clone(),
                     },
                 })
             }
@@ -836,7 +868,8 @@ impl Parser {
     fn parse_print(&mut self) -> ParseResult<Expr> {
         let start = self
             .expect(TokenKind::Keyword(Keyword::Print), "Ausgabe schluesselwort")?
-            .span;
+            .span
+            .clone();
         self.expect(
             TokenKind::LParen,
             "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
@@ -852,17 +885,17 @@ impl Parser {
                 }
             }
         }
-        let end = self.expect(TokenKind::RParen, "Es scheint als haettest du eine schliessende Klammer fuer den #ausgabe befehl vergessen")?.span;
+        let end = self.expect(TokenKind::RParen, "Es scheint als haettest du eine schliessende Klammer fuer den #ausgabe befehl vergessen")?.span.clone();
         let span = start.combine(&end);
         Ok(Expr {
             node: ExprKind::Intrinsic {
                 kind: Intrinsic::Print,
                 args,
             },
-            span,
+            span: span.clone(),
             ty: Ty {
                 kind: TyKind::Infer,
-                span,
+                span: span.clone(),
             },
         })
     }
@@ -873,7 +906,8 @@ impl Parser {
                 TokenKind::Keyword(Keyword::Read),
                 "An dieser stelle haben wir den intrinsichen Lese Befehl erwartet!",
             )?
-            .span;
+            .span
+            .clone();
         self.expect(
             TokenKind::LParen,
             "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
@@ -884,17 +918,18 @@ impl Parser {
                 TokenKind::RParen,
                 "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
             )?
-            .span;
+            .span
+            .clone();
         let span = start.combine(&end);
         Ok(Expr {
             node: ExprKind::Intrinsic {
                 kind: Intrinsic::Read,
                 args: vec![file_name],
             },
-            span,
+            span: span.clone(),
             ty: Ty {
                 kind: TyKind::Infer,
-                span,
+                span: span.clone(),
             },
         })
     }
@@ -905,7 +940,8 @@ impl Parser {
                 TokenKind::Keyword(Keyword::Read),
                 "An dieser stelle haben wir den intrinsichen Lese Befehl erwartet!",
             )?
-            .span;
+            .span
+            .clone();
         self.expect(
             TokenKind::LParen,
             "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
@@ -921,17 +957,18 @@ impl Parser {
                 TokenKind::RParen,
                 "Kompiler intrinsiche Funktionen werden wie normale Funktionen aufgerufen!",
             )?
-            .span;
+            .span
+            .clone();
         let span = start.combine(&end);
         Ok(Expr {
             node: ExprKind::Intrinsic {
                 kind: Intrinsic::Write,
                 args: vec![file_name, content],
             },
-            span,
+            span: span.clone(),
             ty: Ty {
                 kind: TyKind::Infer,
-                span,
+                span: span.clone(),
             },
         })
     }
@@ -948,7 +985,7 @@ impl Parser {
             )?;
             let expr = self.parse_expr()?;
 
-            let span = name.span.combine(&expr.span);
+            let span = name.span.clone().combine(&expr.span.clone());
             let member = Member::new(name, expr, span);
             members.push(member);
 
@@ -959,14 +996,14 @@ impl Parser {
         }
         let end = self
             .expect(TokenKind::RBrace, "Wir denken du hast hier eine schließende Klammer `(` vergessen. schlissende Klammer vergessen?")?//torben
-            .span;
-        let span = name.span.combine(&end);
+            .span.clone();
+        let span = name.span.clone().combine(&end);
         let expr = Expr {
             node: ExprKind::Struct { name, members },
-            span,
+            span: span.clone(),
             ty: Ty {
                 kind: TyKind::Infer,
-                span,
+                span: span.clone(),
             },
         };
         Ok(expr)
@@ -974,28 +1011,39 @@ impl Parser {
 
     fn parse_primary(&mut self) -> ParseResult<Expr> {
         match self.peek_kind()? {
-            TokenKind::Keyword(Keyword::This) => {
-                let var = self.parse_ident()?;
-                let sp = var.span;
-                let node = ExprKind::This(var);
-                Ok(Expr::new(node, sp))
-            }
             TokenKind::Lit(lit) => {
-                let span = self.advance()?.span;
+                let span = self.advance()?.span.clone();
                 Ok(Expr {
                     node: ExprKind::Lit(lit),
                     ty: Ty {
                         kind: TyKind::Infer,
-                        span,
+                        span: span.clone(),
                     },
-                    span,
+                    span: span.clone(),
                 })
             }
             TokenKind::LParen => self.parse_tup(),
             TokenKind::LBracket => self.parse_arr(),
             TokenKind::Ident(_) => self.parse_primary_ident(),
+            TokenKind::Keyword(Keyword::This) => {
+                let var = self.expect(
+                    TokenKind::Keyword(Keyword::This),
+                    "An dieser Stelle haben wir das Schluesselwort `selbst` erwartet!",
+                )?;
+                Ok(Expr {
+                    node: ExprKind::This(Ident {
+                        lexeme: "selbst".to_string(),
+                        span: var.span.clone(),
+                    }),
+                    span: var.span.clone(),
+                    ty: Ty {
+                        kind: TyKind::Infer,
+                        span: var.span.clone(),
+                    },
+                })
+            }
             _ => {
-                let sp = self.advance()?.span;
+                let sp = self.advance()?.span.clone();
                 Err(self.span_err(ErrKind::Syntax(SyntaxErr::ExpectedExpr), sp))
             }
         }
@@ -1012,28 +1060,28 @@ impl Parser {
                         expected,
                         actual: self.peek_kind()?,
                     });
-                    let span = self.advance()?.span;
+                    let span = self.advance()?.span.clone();
                     Err(self.span_err(err, span))
                 }
             },
             _ => {
-                let span = pat.span;
+                let span = pat.span.clone();
                 if pat.len() == 1 {
                     Ok(Expr {
                         node: ExprKind::Var(pat.first().unwrap().clone()),
                         span,
                         ty: Ty {
                             kind: TyKind::Infer,
-                            span,
+                            span: pat.span.clone(),
                         },
                     })
                 } else {
                     Ok(Expr {
                         node: ExprKind::Path(pat),
-                        span,
+                        span: span.clone(),
                         ty: Ty {
                             kind: TyKind::Infer,
-                            span,
+                            span: span.clone(),
                         },
                     })
                 }
@@ -1042,7 +1090,7 @@ impl Parser {
     }
 
     fn parse_tup(&mut self) -> ParseResult<Expr> {
-        let start = self.advance()?.span;
+        let start = self.advance()?.span.clone();
         let mut values = Vec::new();
         while self.peek_kind()? != TokenKind::RParen {
             values.push(self.parse_expr()?);
@@ -1051,20 +1099,26 @@ impl Parser {
                 _ => self.expect(TokenKind::Comma, "ausdruck")?,
             };
         }
-        let end = self.expect(TokenKind::RParen, "schliessende Klammer")?.span;
+        let end = self
+            .expect(TokenKind::RParen, "schliessende Klammer")?
+            .span
+            .clone();
         let span = start.combine(&end);
         Ok(Expr {
             node: ExprKind::Tup(values),
-            span,
+            span: span.clone(),
             ty: Ty {
                 kind: TyKind::Infer,
-                span,
+                span: span.clone(),
             },
         })
     }
 
     fn parse_arr(&mut self) -> ParseResult<Expr> {
-        let start = self.expect(TokenKind::LBracket, "Feldliteral")?.span;
+        let start = self
+            .expect(TokenKind::LBracket, "Feldliteral")?
+            .span
+            .clone();
         let mut values = Vec::new();
         while self.peek_kind()? != TokenKind::RBracket {
             values.push(self.parse_expr()?);
@@ -1073,7 +1127,10 @@ impl Parser {
                 _ => self.expect(TokenKind::Comma, "Feldelement")?,
             };
         }
-        let end = self.expect(TokenKind::RBracket, "Feldliteral")?.span;
+        let end = self
+            .expect(TokenKind::RBracket, "Feldliteral")?
+            .span
+            .clone();
         let span = start.combine(&end);
         Ok(Expr {
             node: ExprKind::Array(values),
@@ -1097,9 +1154,9 @@ impl Parser {
                     expr = self.parse_index(expr)?;
                 }
                 TokenKind::Dot => {
-                    let start = self.advance()?.span;
+                    let start = self.advance()?.span.clone();
                     let name = self.parse_ident()?;
-                    let span = start.combine(&name.span);
+                    let span = start.combine(&name.span.clone());
                     let node = ExprKind::Field(Box::new(expr), name);
                     expr = Expr::new(node, span)
                 }
@@ -1119,35 +1176,35 @@ impl Parser {
                 self.expect(TokenKind::Comma, "Argument")?;
             }
         }
-        let end = self.expect(TokenKind::RParen, "argumente")?.span;
-        let span = callee.span.combine(&end);
+        let end = self.expect(TokenKind::RParen, "argumente")?.span.clone();
+        let span = callee.span.clone().combine(&end);
         Ok(Expr {
-            span,
+            span: span.clone(),
             node: ExprKind::Call {
                 callee: Box::new(callee),
                 args,
             },
             ty: Ty {
                 kind: TyKind::Infer,
-                span,
+                span: span.clone(),
             },
         })
     }
 
     fn parse_index(&mut self, callee: Expr) -> ParseResult<Expr> {
-        let start = self.expect(TokenKind::LBracket, "Wenn du ein Feld erstellten willst, musst du ´[´ benutzen. Hier ist ´[´ der Feldindex! Feldindex")?.span; //torben
+        let start = self.expect(TokenKind::LBracket, "Wenn du ein Feld erstellten willst, musst du ´[´ benutzen. Hier ist ´[´ der Feldindex! Feldindex")?.span.clone(); //torben
         let index = self.parse_expr()?;
-        let end = self.expect(TokenKind::RBracket, "Wenn du ein Feld erstellen willst, musst du ´]´ benutzen. Hier ist ´]´ der Feldindex! ] nach Feldindex")?.span; //torben
+        let end = self.expect(TokenKind::RBracket, "Wenn du ein Feld erstellen willst, musst du ´]´ benutzen. Hier ist ´]´ der Feldindex! ] nach Feldindex")?.span.clone(); //torben
         let span = start.combine(&end);
         Ok(Expr {
             node: ExprKind::Index {
                 callee: Box::new(callee),
                 index: Box::new(index),
             },
-            span,
+            span: span.clone(),
             ty: Ty {
                 kind: TyKind::Infer,
-                span,
+                span: span.clone(),
             },
         })
     }
@@ -1157,7 +1214,7 @@ impl Parser {
         match self.peek_kind()? {
             TokenKind::Ident(_) => self.advance()?.try_into(),
             _ => {
-                let sp = self.advance()?.span;
+                let sp = self.advance()?.span.clone();
                 let err = ErrKind::Syntax(SyntaxErr::ExpectedTy);
                 Err(self.span_err(err, sp))
             }
@@ -1195,7 +1252,7 @@ impl Parser {
             }
             None => Err(self.span_err(
                 ErrKind::Syntax(SyntaxErr::UnexpectedEOF),
-                self.last.as_ref().unwrap().span,
+                self.last.as_ref().unwrap().span.clone(),
             )),
         }
     }
@@ -1210,7 +1267,7 @@ impl Parser {
         if self.peek_kind()? == expected {
             self.advance()
         } else {
-            let span = self.last.as_ref().unwrap().span;
+            let span = self.last.as_ref().unwrap().span.clone();
             let diag = Diagnostic {
                 kind: ErrKind::Syntax(SyntaxErr::MissingToken {
                     expected: vec![expected],

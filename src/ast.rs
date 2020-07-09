@@ -2,6 +2,8 @@ use super::lexer::*;
 use crate::errors::*;
 use crate::typer::*;
 
+use std::path::*;
+
 use std::collections::HashMap;
 use std::convert::TryFrom;
 
@@ -565,7 +567,7 @@ impl Expr {
     pub fn new(node: ExprKind, span: Span) -> Self {
         Self {
             node,
-            span,
+            span: span.clone(),
             ty: Ty {
                 kind: TyKind::Infer,
                 span,
@@ -576,7 +578,7 @@ impl Expr {
     pub fn empty(span: Span) -> Self {
         Self {
             node: ExprKind::Tup(Vec::new()),
-            span,
+            span: span.clone(),
             ty: Ty {
                 kind: TyKind::Tup(Vec::new()),
                 span,
@@ -685,10 +687,11 @@ pub struct Call {
     pub args: Vec<Expr>,
 }
 
-#[derive(Copy, Hash, Clone)]
+#[derive(Hash, Clone)]
 pub struct Span {
     pub lo: usize,
     pub hi: usize,
+    pub file: PathBuf,
 }
 
 impl PartialEq for Span {
@@ -714,19 +717,25 @@ impl fmt::Debug for Span {
 
 impl Default for Span {
     fn default() -> Self {
-        Self { lo: 0, hi: 0 }
+        Self {
+            lo: 0,
+            hi: 0,
+            file: PathBuf::default(),
+        }
     }
 }
 
 impl Span {
-    pub fn new(lo: usize, hi: usize) -> Self {
-        Span { lo, hi }
+    pub fn new(lo: usize, hi: usize, file: PathBuf) -> Self {
+        Span { lo, hi, file }
     }
 
     pub fn combine(&self, rhs: &Span) -> Self {
+        assert_eq!(self.file, rhs.file);
         Span {
             lo: std::cmp::min(self.lo, rhs.lo),
             hi: std::cmp::max(self.hi, rhs.hi),
+            file: self.file.clone(),
         }
     }
 }

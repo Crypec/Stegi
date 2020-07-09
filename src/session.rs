@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::time::Instant;
 
 use crate::typer::*;
 
@@ -17,115 +16,77 @@ pub struct SourceMap {
 }
 
 pub struct Driver {
-    pub sess: Session,
-}
-
-impl Driver {
-    pub fn new(files: Vec<PathBuf>) -> Self {
-        Self {
-            sess: Session::new(files),
-        }
-    }
-
-    pub fn compile(&mut self) {
-        let current_src_map = self.sess.files.get(self.sess.current).unwrap();
-        let now = Instant::now();
-        let buf = &self.sess.files.first().unwrap().buf;
-        let t_stream = Lexer::new(&buf)
-            .collect::<Result<Vec<Token>, Diagnostic>>()
-            .expect("failed to tokenize file");
-        let t_stream = infer_semis(t_stream);
-        let ast = Parser::new(t_stream).collect::<Vec<Result<Decl, Diagnostic>>>();
-        println!("{:#?}", now.elapsed());
-        let (ast, errors): (Vec<_>, Vec<_>) = ast.into_iter().partition(Result::is_ok);
-        let mut ast: Vec<_> = ast.into_iter().map(Result::unwrap).collect();
-        // FIXME(Simon): these should be converted into UserDiagnostics
-
-        ImplReoderPass::new().reorder(&mut ast);
-
-        errors
-            .into_iter()
-            .map(Result::unwrap_err)
-            .map(|diag| UserDiagnostic::new(diag, current_src_map.clone()))
-            .for_each(|diag| println!("{}", diag));
-
-        self.sess.diagnostics.extend(Typer::new().infer(&mut ast));
-        let had_err = self.sess.diagnostics.iter().any(|d| match d.kind {
-            ErrKind::Runtime(_) | ErrKind::Syntax(_) | ErrKind::Type(_) | ErrKind::Internal(_) => {
-                true
-            }
-            ErrKind::Warning { .. } => false,
-        });
-
-        self.sess
-            .diagnostics
-            .iter()
-            .map(|d| UserDiagnostic {
-                src_map: current_src_map.clone(),
-                kind: d.kind.clone(),
-                span: d.span,
-                suggestions: d.suggestions.clone(),
-            })
-            .for_each(|ud| eprintln!("{}", ud));
-
-        if had_err {
-            eprintln!("Fehler beim Kompilieren gefunden. Programm wird nicht ausgefuehrt! :c\n");
-            std::process::exit(1);
-        }
-        Interp::new().interp(&mut ast);
-
-        //     self.sess
-        //         .borrow()
-        //         .diagnostics
-        //         .iter()
-        //         .for_each(|d| eprintln!("{}", d))
-        // }
-    }
-}
-
-impl SourceMap {
-    pub fn new(path: PathBuf) -> Self {
-        let buf = std::fs::read_to_string(&path).expect("failed to read file");
-        Self { path, buf }
-    }
-}
-
-pub struct Session {
     pub files: Vec<SourceMap>,
     pub diagnostics: Vec<Diagnostic>,
     // Stores the index of the current file
     // FIXME(Simon): this seriously hinders us paralellizing the compiler
     // FIXME(Simon): this needs to be cleaned up later, but I don't know how I will be approaching this
-    pub current: usize,
 }
-impl Session {
+
+impl Driver {
     pub fn new(files: Vec<PathBuf>) -> Self {
         Self {
-            files: files.into_iter().map(SourceMap::new).collect(),
-            current: 0,
+            files: files.into_iter().map(|f| SourceMap::new(f)).collect(),
             diagnostics: Vec::new(),
         }
     }
 
-    // pub fn span_err<S: Into<String>>(&self, desc: S, msg: S, span: &Span) -> Diagnostic {
-    //     Diagnostic {
-    //         desc: desc.into(),
-    //         msg: msg.into(),
-    //         suggestions: Vec::new(),
-    //         span: span.clone(),
-    //         severity: Severity::Fatal,
-    //         src_map: self.clone(),
-    //     }
-    // }
+    pub fn start(&mut self) {
+        let mut ast: Vec<Decl> = AST::new();
+        dbg!(&self.files);
+        for file in &self.files {
+            let lex_result = Lexer::new(&file.buf, file.path.clone())
+                .collect::<Result<Vec<Token>, Diagnostic>>();
+            let t_stream = match lex_result {
+                Ok(t_stream) => t_stream,
+                Err(e) => {
+                    self.diagnostics.push(e);
+                    Vec::new()
+                }
+            };
+            let t_stream = infer_semis(t_stream);
 
-    // pub fn span_warn<S: Into<String>>(&self, desc: S, msg: S, span: &Span) -> Diagnostic {
-    //     Diagnostic {
-    //         desc: desc.into(),
-    //         msg: msg.into(),
-    //         suggestions: Vec::new(),
-    //         span: span.clone(),
-    //         severity: Severity::Warning,
-    //         src_map: self.src_map.clone(),
-    //     }
-    // }
+            let parse_result =
+                Parser::new(t_stream, &file.path).collect::<Vec<Result<Decl, Diagnostic>>>();
+            let (nodes, errors): (Vec<_>, Vec<_>) =
+                parse_result.into_iter().partition(Result::is_ok);
+            let file_ast: Vec<_> = nodes.into_iter().map(Result::unwrap).collect();
+            ast.extend(file_ast);
+
+            self.diagnostics.extend(
+                errors
+                    .into_iter()
+                    .map(Result::unwrap_err)
+                    .collect::<Vec<Diagnostic>>(),
+            );
+            dbg!(&self.diagnostics);
+        }
+        dbg!(&ast);
+        ImplReoderPass::new().reorder(&mut ast);
+        self.diagnostics.extend(Typer::new().infer(&mut ast));
+        if self.had_err() {
+            eprintln!("Fehler beim Kompilieren gefunden. Programm wird nicht ausgefuehrt! :c\n");
+            for err in &self.diagnostics {
+                eprintln!("{}", err);
+            }
+            std::process::exit(1);
+        }
+        Interp::new().interp(&mut ast);
+    }
+
+    pub fn had_err(&self) -> bool {
+        self.diagnostics.iter().any(|d| match d.kind {
+            ErrKind::Runtime(_) | ErrKind::Syntax(_) | ErrKind::Type(_) | ErrKind::Internal(_) => {
+                true
+            }
+            ErrKind::Warning { .. } => false,
+        })
+    }
+}
+
+impl SourceMap {
+    pub fn new(path: PathBuf) -> Self {
+        let buf = std::fs::read_to_string(&path).expect("Datei konnte nicht gelesen werden");
+        Self { path, buf }
+    }
 }

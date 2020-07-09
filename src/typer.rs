@@ -3,6 +3,8 @@ use std::collections::*;
 use std::convert::TryFrom;
 use std::fmt;
 
+use crate::ast::Path;
+
 use crate::errors::*;
 use crate::lexer::*;
 
@@ -12,6 +14,15 @@ use itertools::Itertools;
 
 use crate::ast::*;
 use crate::errors::Diagnostic;
+
+macro_rules! is_type(
+    ($val:expr, $p:pat) => {
+        match $val {
+            $p => true,
+            _ => false,
+        }
+    }
+);
 
 // NOTE(Simon): we might need to adjust this threshold to avoid too many false positives
 #[allow(dead_code)]
@@ -131,14 +142,14 @@ impl TyKind {
             }
             TyKind::Array(ref t) => TyKind::Array(Box::new(Ty {
                 kind: t.kind.infer_internal_types(),
-                span: t.span,
+                span: t.span.clone(),
             })),
             TyKind::Tup(ref elems) => {
                 let mut new_types = Vec::new();
                 for e in elems {
                     new_types.push(Ty {
                         kind: e.kind.infer_internal_types(),
-                        span: e.span,
+                        span: e.span.clone(),
                     });
                 }
                 TyKind::Tup(new_types)
@@ -182,6 +193,13 @@ impl TyKind {
             TyKind::Enum(enm) => format!("enum: {}", enm.name.lexeme),
         }
     }
+
+    pub fn empty_array_ty(span: Span) -> Self {
+        TyKind::Array(box Ty {
+            kind: TyKind::Infer,
+            span,
+        })
+    }
 }
 
 pub struct Typer;
@@ -194,12 +212,14 @@ impl Typer {
     pub fn infer(&self, ast: &mut AST) -> Vec<Diagnostic> {
         let mut errs = Vec::new();
         errs.extend(TyLoweringPass::new().apply(ast));
-        let (subst, diags) = TyConsGenPass::new().gen(ast);
-        if !diags.is_empty() {
-            errs.extend(diags);
-            return errs;
-        }
-        TypeSubstitutor::new(subst).apply_subst(ast);
+        errs.extend(TyInferencePrePass::new().apply(ast));
+        // let (subst, diags) = TyConsGenPass::new().gen(ast);
+        // if !diags.is_empty() {
+        //     errs.extend(diags);
+        //     return errs;
+        // }
+
+        // TypeSubstitutor::new(subst).apply_subst(ast);
         Vec::new()
     }
 }
@@ -224,7 +244,7 @@ impl TyLoweringPass {
                         if !self.is_available(&ty) {
                             diag.push(Diagnostic {
                                 kind: ErrKind::Type(TypeErr::TyNotFound(format!("{}", &ty))),
-                                span: ty.span,
+                                span: ty.span.clone(),
                                 suggestions: Vec::new(),
                             })
                         }
@@ -238,7 +258,7 @@ impl TyLoweringPass {
                                 if !self.is_available(&e) {
                                     diag.push(Diagnostic {
                                         kind: ErrKind::Type(TypeErr::TyNotFound(format!("{}", &e))),
-                                        span: e.span,
+                                        span: e.span.clone(),
                                         suggestions: Vec::new(),
                                     })
                                 }
@@ -291,6 +311,692 @@ impl TyLoweringPass {
     }
 }
 
+struct TyInferencePrePass {
+    cxt: Cxt<String, Ty>,
+    ty_table: HashMap<String, TyDecl>,
+    err: Vec<Diagnostic>,
+}
+
+impl TyInferencePrePass {
+    fn new() -> Self {
+        Self {
+            cxt: Cxt::new(),
+            ty_table: HashMap::new(),
+            err: Vec::new(),
+        }
+    }
+
+    fn fill_ty_table(&mut self, ast: &AST) {
+        for d in ast.iter() {
+            if let Decl::TyDecl(t) = d {
+                self.ty_table.insert(t.name().lexeme.clone(), t.clone());
+            }
+        }
+    }
+
+    fn apply(&mut self, ast: &mut AST) -> Vec<Diagnostic> {
+        self.fill_ty_table(ast);
+        for node in ast {
+            node.accept(self)
+        }
+        self.err.clone()
+    }
+
+    fn infer_block(&mut self, block: &mut Block) {
+        self.cxt.push_scope();
+        for stmt in &mut block.stmts {
+            stmt.accept(self)
+        }
+        self.cxt.pop_scope();
+    }
+
+    fn infer_fn(&mut self, f: &mut FnDecl) {
+        self.cxt.push_frame();
+        for param in &f.header.params {
+            self.cxt.insert(param.name.lexeme.clone(), param.ty.clone());
+        }
+        self.infer_block(&mut f.body);
+        self.cxt.pop_frame();
+    }
+
+    pub fn infer_expr(&mut self, e: &mut Expr) {
+        e.accept(self);
+    }
+
+    fn match_assign(&mut self, target: &AssingKind) -> Option<Ty> {
+        match target {
+            AssingKind::Var(var) => match self.cxt.get(&var.lexeme) {
+                Some(t) => Some(t.clone()),
+                None => {
+                    self.span_err(TypeErr::VarNotFound(var.lexeme.clone()), var.span.clone());
+                    None
+                }
+            },
+            AssingKind::Field {
+                ref callee,
+                ref name,
+            } => match self.match_assign(callee) {
+                Some(t) => {
+                    if let TyKind::Struct(s) = t.kind {
+                        match s.fields.get(&name) {
+                            Some(t) => Some(t.clone()),
+                            None => {
+                                self.span_err(
+                                    TypeErr::FieldNotFound {
+                                        ty: TyKind::Struct(s),
+                                        field: name.lexeme.clone(),
+                                    },
+                                    name.span.clone(),
+                                );
+                                None
+                            }
+                        }
+                    } else {
+                        self.span_err(
+                            TypeErr::FieldNotFound {
+                                ty: t.kind,
+                                field: name.lexeme.clone(),
+                            },
+                            name.span.clone(),
+                        );
+                        None
+                    }
+                }
+                None => return None,
+            },
+            AssingKind::Index { ref callee, .. } => match self.match_assign(callee) {
+                Some(t) => {
+                    if let TyKind::Array(ref elem) = t.kind {
+                        Some(*elem.clone())
+                    } else {
+                        self.span_err(
+                            TypeErr::InvalidType {
+                                expected: TyKind::empty_array_ty(Span::default()),
+                                actual: t.clone(),
+                            },
+                            t.span.clone(),
+                        );
+                        None
+                    }
+                }
+                None => None,
+            },
+        }
+    }
+
+    fn infer_struct_lit(&mut self, name: &Ident, members: &mut Vec<Member>) {
+        let ty = self.cxt.get(&name.lexeme);
+        match ty {
+            Some(t) => {
+                if let TyKind::Struct(s) = &t.kind {
+                    for member in members {
+                        match s.fields.get(&member.name) {
+                            Some(tk) if *tk == member.init.ty => {}
+                            Some(tk) => {
+                                self.err.push(Diagnostic {
+                                    kind: ErrKind::Type(TypeErr::InvalidType {
+                                        expected: tk.kind.clone(),
+                                        actual: member.init.ty.clone(),
+                                    }),
+                                    span: member.span.clone(),
+                                    suggestions: Vec::new(),
+                                });
+                                member.init.ty.kind = tk.kind.clone();
+                            }
+                            None => {
+                                self.err.push(Diagnostic {
+                                    kind: ErrKind::Type(TypeErr::FieldNotFound {
+                                        ty: t.kind.clone(),
+                                        field: member.name.lexeme.clone(),
+                                    }),
+                                    span: name.span.clone(),
+                                    suggestions: Vec::new(),
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    todo!();
+                }
+            }
+            None => {
+                // TODO(Simon): Provide suggestions
+                self.span_err(TypeErr::TyNotFound(name.lexeme.clone()), name.span.clone());
+            }
+        }
+    }
+
+    fn span_err(&mut self, kind: TypeErr, span: Span) {
+        self.err.push(Diagnostic {
+            kind: ErrKind::Type(kind),
+            span,
+            suggestions: Vec::new(),
+        })
+    }
+}
+
+impl Visitor for TyInferencePrePass {
+    type Result = ();
+
+    fn visit_decl(&mut self, decl: &mut Decl) -> Self::Result {
+        if let Decl::Fn(f) = decl {
+            self.infer_fn(f);
+        }
+    }
+    fn visit_stmt(&mut self, stmt: &mut Stmt) -> Self::Result {
+        match stmt {
+            Stmt::VarDef(ref mut vardef) => {
+                self.infer_expr(&mut vardef.init);
+                self.cxt
+                    .insert(vardef.pat.lexeme.clone(), vardef.init.ty.clone());
+            }
+            Stmt::Block(ref mut block) => self.infer_block(block),
+            Stmt::For {
+                ref mut vardef,
+                ref mut body,
+                ..
+            } => {
+                self.infer_expr(&mut vardef.init);
+                if !is_type!(vardef.init.ty.kind, TyKind::Array(_)) {
+                    self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::empty_array_ty(Span::default()),
+                            actual: vardef.init.ty.clone(),
+                        },
+                        vardef.init.span.clone(),
+                    );
+                }
+                self.cxt.push_scope();
+                self.cxt
+                    .insert(vardef.pat.lexeme.clone(), vardef.init.ty.clone());
+                self.infer_block(body);
+                self.cxt.pop_scope();
+            }
+            Stmt::If {
+                ref mut cond,
+                ref mut body,
+                ref mut else_branches,
+                ref mut final_branch,
+                ..
+            } => {
+                self.infer_expr(cond);
+                if !is_type!(cond.ty.kind, TyKind::Bool) {
+                    self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::Bool,
+                            actual: cond.ty.clone(),
+                        },
+                        cond.span.clone(),
+                    );
+                }
+                self.infer_block(body);
+                for branch in else_branches {
+                    self.infer_expr(&mut branch.cond);
+                    if !is_type!(cond.ty.kind, TyKind::Bool) {
+                        self.span_err(
+                            TypeErr::InvalidType {
+                                expected: TyKind::Bool,
+                                actual: cond.ty.clone(),
+                            },
+                            cond.span.clone(),
+                        );
+                    }
+                    self.infer_block(&mut branch.body);
+                }
+
+                if let Some(fb) = final_branch {
+                    self.infer_block(&mut fb.body);
+                }
+            }
+            Stmt::While {
+                ref mut cond,
+                ref mut body,
+                ..
+            } => {
+                self.infer_expr(cond);
+                if !is_type!(cond.ty.kind, TyKind::Bool) {
+                    self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::Bool,
+                            actual: cond.ty.clone(),
+                        },
+                        cond.span.clone(),
+                    )
+                }
+
+                self.infer_block(body);
+            }
+            Stmt::Expr(ref mut e) => self.infer_expr(e),
+            Stmt::Assign {
+                ref target,
+                ref mut rhs,
+                ..
+            } => {
+                self.infer_expr(rhs);
+                match self.match_assign(&target.kind) {
+                    Some(t) => {
+                        if t.kind != rhs.ty.kind {
+                            self.span_err(
+                                TypeErr::InvalidType {
+                                    actual: Ty::default_unit_type(target.span.clone()),
+                                    expected: rhs.ty.kind.clone(),
+                                },
+                                target.span.clone(),
+                            );
+                        }
+                    }
+                    None => self.span_err(
+                        TypeErr::InvalidType {
+                            actual: Ty::default_unit_type(target.span.clone()),
+                            expected: rhs.ty.kind.clone(),
+                        },
+                        target.span.clone(),
+                    ),
+                }
+            }
+            Stmt::Ret(e, _) => self.infer_expr(e),
+            Stmt::Break(_) | Stmt::Continue(_) => {}
+        }
+    }
+    fn visit_expr(&mut self, expr: &mut Expr) -> Self::Result {
+        match expr.node {
+            ExprKind::Binary {
+                ref mut lhs,
+                op: _,
+                ref mut rhs,
+            } => {
+                self.infer_expr(lhs);
+                self.infer_expr(rhs);
+                match (&lhs.ty.kind, &rhs.ty.kind) {
+                    (TyKind::Num, TyKind::Num) => {}
+                    (TyKind::Num, _) => self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::Num,
+                            actual: rhs.ty.clone(),
+                        },
+                        rhs.span.clone(),
+                    ),
+                    (_, TyKind::Num) => self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::Num,
+                            actual: lhs.ty.clone(),
+                        },
+                        lhs.span.clone(),
+                    ),
+                    _ => {
+                        self.span_err(
+                            TypeErr::InvalidType {
+                                expected: TyKind::Num,
+                                actual: rhs.ty.clone(),
+                            },
+                            rhs.span.clone(),
+                        );
+                        self.span_err(
+                            TypeErr::InvalidType {
+                                expected: TyKind::Num,
+                                actual: lhs.ty.clone(),
+                            },
+                            lhs.span.clone(),
+                        );
+                    }
+                };
+                expr.ty.kind = TyKind::Num;
+            }
+            ExprKind::Logical {
+                ref mut lhs,
+                ref op,
+                ref mut rhs,
+            } => {
+                self.infer_expr(lhs);
+                self.infer_expr(rhs);
+                match op {
+                    CmpOp::And | CmpOp::Or => {
+                        match (&lhs.ty.kind, &rhs.ty.kind) {
+                            (TyKind::Bool, TyKind::Bool) => {}
+                            (TyKind::Bool, _) => self.span_err(
+                                TypeErr::InvalidType {
+                                    expected: TyKind::Bool,
+                                    actual: rhs.ty.clone(),
+                                },
+                                rhs.span.clone(),
+                            ),
+                            (_, TyKind::Bool) => self.span_err(
+                                TypeErr::InvalidType {
+                                    expected: TyKind::Bool,
+                                    actual: lhs.ty.clone(),
+                                },
+                                lhs.span.clone(),
+                            ),
+                            _ => {
+                                self.span_err(
+                                    TypeErr::InvalidType {
+                                        expected: TyKind::Bool,
+                                        actual: rhs.ty.clone(),
+                                    },
+                                    rhs.span.clone(),
+                                );
+                                self.span_err(
+                                    TypeErr::InvalidType {
+                                        expected: TyKind::Bool,
+                                        actual: lhs.ty.clone(),
+                                    },
+                                    lhs.span.clone(),
+                                );
+                            }
+                        };
+                    }
+                    CmpOp::EqEq | CmpOp::NotEq => {
+                        self.span_err(
+                            TypeErr::InvalidType {
+                                actual: lhs.ty.clone(),
+                                expected: rhs.ty.kind.clone(),
+                            },
+                            expr.span.clone(),
+                        );
+                    }
+                    CmpOp::Greater | CmpOp::GreaterEq | CmpOp::Less | CmpOp::LessEq => {
+                        match (&lhs.ty.kind, &rhs.ty.kind) {
+                            (TyKind::Num, TyKind::Num) => {}
+                            (TyKind::Num, _) => self.span_err(
+                                TypeErr::InvalidType {
+                                    expected: TyKind::Num,
+                                    actual: rhs.ty.clone(),
+                                },
+                                rhs.span.clone(),
+                            ),
+                            (_, TyKind::Num) => self.span_err(
+                                TypeErr::InvalidType {
+                                    expected: TyKind::Num,
+                                    actual: lhs.ty.clone(),
+                                },
+                                lhs.span.clone(),
+                            ),
+                            _ => {
+                                self.span_err(
+                                    TypeErr::InvalidType {
+                                        expected: TyKind::Num,
+                                        actual: rhs.ty.clone(),
+                                    },
+                                    rhs.span.clone(),
+                                );
+                                self.span_err(
+                                    TypeErr::InvalidType {
+                                        expected: TyKind::Num,
+                                        actual: lhs.ty.clone(),
+                                    },
+                                    lhs.span.clone(),
+                                );
+                            }
+                        };
+                    }
+                }
+                expr.ty.kind = TyKind::Bool;
+            }
+            ExprKind::Unary {
+                ref mut rhs,
+                ref op,
+            } => {
+                self.infer_expr(rhs);
+                let ty = match op {
+                    UnaryOp::Minus => TyKind::Num,
+                    UnaryOp::Not => TyKind::Bool,
+                };
+                if rhs.ty.kind != ty {
+                    self.span_err(
+                        TypeErr::InvalidType {
+                            expected: ty,
+                            actual: rhs.ty.clone(),
+                        },
+                        rhs.span.clone(),
+                    )
+                } else {
+                    expr.ty.kind = ty;
+                }
+            }
+            ExprKind::Tup(ref mut tuple) => {
+                for elem in tuple.iter_mut() {
+                    self.infer_expr(elem);
+                }
+
+                expr.ty.kind = TyKind::Tup(tuple.iter().map(|elem| elem.ty.clone()).collect());
+
+                // transform tuple into normal node if it has only 1 element
+                if tuple.len() <= 1 {
+                    expr.node = tuple.first().unwrap().clone().node;
+                }
+            }
+            ExprKind::Index {
+                ref mut callee,
+                ref mut index,
+            } => {
+                self.infer_expr(callee);
+                self.infer_expr(index);
+
+                // TODO(Simon): Allow for indexing tuple types
+                if !is_type!(callee.ty.kind, TyKind::Array(_)) {
+                    self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::empty_array_ty(callee.span.clone()),
+                            actual: callee.ty.clone(),
+                        },
+                        callee.span.clone(),
+                    );
+                    expr.ty.kind = TyKind::Array(box Ty::default_unit_type(callee.span.clone()))
+                }
+                if !is_type!(index.ty.kind, TyKind::Num) {
+                    self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::empty_array_ty(callee.span.clone()),
+                            actual: callee.ty.clone(),
+                        },
+                        callee.span.clone(),
+                    );
+                    index.ty.kind = TyKind::Num;
+                    expr.ty.kind = TyKind::Array(box Ty::default_unit_type(callee.span.clone()))
+                }
+            }
+            ExprKind::Struct {
+                ref name,
+                ref mut members,
+            } => {
+                members
+                    .iter_mut()
+                    .for_each(|member| self.infer_expr(&mut member.init));
+                self.infer_struct_lit(name, members);
+            }
+            ExprKind::Var(ref var) | ExprKind::This(ref var) => match self.cxt.get(&var.lexeme) {
+                Some(t) => expr.ty.kind = t.clone().kind,
+                None => {
+                    self.span_err(TypeErr::VarNotFound(var.lexeme.clone()), var.span.clone());
+                    expr.ty.kind = Ty::default_unit_type(expr.span.clone()).kind;
+                }
+            },
+            ExprKind::Array(ref mut array) => {
+                for elem in array.iter_mut() {
+                    self.infer_expr(elem);
+                }
+                let kind = match array.first().cloned() {
+                    Some(e) => e.ty.kind,
+                    None => Ty::default_unit_type(expr.span.clone()).kind,
+                };
+                for elem in array {
+                    if elem.ty.kind != kind {
+                        self.span_err(
+                            TypeErr::InvalidType {
+                                expected: kind.clone(),
+                                actual: elem.ty.clone(),
+                            },
+                            elem.span.clone(),
+                        )
+                    }
+                }
+                expr.ty.kind = TyKind::Array(box Ty {
+                    kind,
+                    span: expr.span.clone(),
+                });
+            }
+            ExprKind::Call {
+                ref mut callee,
+                ref mut args,
+            } => {
+                // TODO(Simon): check parameter names
+                args.iter_mut().for_each(|arg| self.infer_expr(arg));
+                self.infer_expr(callee);
+                if !is_type!(callee.ty.kind, TyKind::Fn(_, _)) {
+                    let arg_types = args.iter().map(|arg| arg.ty.clone()).collect();
+                    self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::Fn(
+                                arg_types,
+                                box Ty::default_unit_type(callee.span.clone()),
+                            ),
+                            actual: callee.ty.clone(),
+                        },
+                        callee.span.clone(),
+                    )
+                }
+            }
+            ExprKind::Intrinsic {
+                ref kind,
+                ref mut args,
+            } => {
+                args.iter_mut().for_each(|arg| self.infer_expr(arg));
+                match kind {
+                    Intrinsic::Read => {
+                        if args.len() != 1 {
+                            self.span_err(
+                                TypeErr::Parity {
+                                    name: "#ausgabe".to_string(),
+                                    expected: 1,
+                                    actual: args.len(),
+                                },
+                                expr.span.clone(),
+                            );
+                            return;
+                        } else {
+                            let fmter = args.first().unwrap();
+                            if !is_type!(fmter.ty.kind, TyKind::Text) {
+                                self.span_err(
+                                    TypeErr::InvalidType {
+                                        expected: TyKind::Text,
+                                        actual: fmter.ty.clone(),
+                                    },
+                                    fmter.span.clone(),
+                                )
+                            }
+                        }
+                    }
+                    Intrinsic::Print => {}
+                    _ => todo!(),
+                }
+            }
+            ExprKind::Range(ref mut lo, ref mut hi) => {
+                self.infer_expr(lo);
+                self.infer_expr(hi);
+
+                match (&lo.ty.kind, &hi.ty.kind) {
+                    (TyKind::Num, TyKind::Num) => {}
+                    (TyKind::Num, _) => self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::Num,
+                            actual: hi.ty.clone(),
+                        },
+                        hi.span.clone(),
+                    ),
+                    (_, TyKind::Num) => self.span_err(
+                        TypeErr::InvalidType {
+                            expected: TyKind::Num,
+                            actual: lo.ty.clone(),
+                        },
+                        lo.span.clone(),
+                    ),
+                    _ => {
+                        self.span_err(
+                            TypeErr::InvalidType {
+                                expected: TyKind::Num,
+                                actual: lo.ty.clone(),
+                            },
+                            lo.span.clone(),
+                        );
+                        self.span_err(
+                            TypeErr::InvalidType {
+                                expected: TyKind::Num,
+                                actual: hi.ty.clone(),
+                            },
+                            hi.span.clone(),
+                        );
+                    }
+                };
+                // NOTE(Simon): Do we really want the compiler to force these types?
+                lo.ty.kind = TyKind::Num;
+                hi.ty.kind = TyKind::Num;
+                expr.ty.kind = TyKind::Array(box Ty {
+                    kind: TyKind::Num,
+                    span: expr.span.clone(),
+                })
+            }
+            ExprKind::Path(ref path) => {
+                if path.len() != 2 {
+                    panic!();
+                    // self.span_err(ErrKind::Internal("Typenpfade mit mehr als 2 Segmenten werden zurzeit noch nicht unterstuezt!".to_string()), path.span.clone());
+                    //return;
+                }
+                let ty_name = &path.first().unwrap();
+                let fn_name = &path.second().unwrap();
+                match self.ty_table.get(&ty_name.lexeme) {
+                    Some(t) => match t.get_method(&fn_name.lexeme) {
+                        Some(f) => {
+                            let arg_types = f.header.params.iter().map(|p| p.ty.clone()).collect();
+                            expr.ty.kind = TyKind::Fn(arg_types, f.header.ret_ty.clone());
+                        }
+                        None => self.span_err(
+                            TypeErr::StaticFnNotFound {
+                                ty_name: ty_name.lexeme.clone(),
+                                fn_name: fn_name.lexeme.clone(),
+                            },
+                            fn_name.span.clone(),
+                        ),
+                    },
+                    None => self.span_err(
+                        TypeErr::TyNotFound(ty_name.lexeme.clone()),
+                        ty_name.span.clone(),
+                    ),
+                }
+            }
+            ExprKind::Lit(ref lit) => {
+                expr.ty.kind = match lit {
+                    Lit::Number(_) => TyKind::Num,
+                    Lit::String(_) => TyKind::Text,
+                    Lit::Bool(_) => TyKind::Bool,
+                }
+            }
+            ExprKind::Field(ref mut callee, ref name) => {
+                self.infer_expr(callee);
+                if let TyKind::Struct(s) = &callee.ty.kind {
+                    match s.fields.get(&name) {
+                        Some(t) => expr.ty.kind = t.kind.clone(),
+                        None => self.span_err(
+                            TypeErr::FieldNotFound {
+                                ty: callee.ty.kind.clone(),
+                                field: name.lexeme.clone(),
+                            },
+                            name.span.clone(),
+                        ),
+                    }
+                } else {
+                    self.span_err(
+                        TypeErr::FieldNotFound {
+                            ty: callee.ty.kind.clone(),
+                            field: name.lexeme.clone(),
+                        },
+                        name.span.clone(),
+                    );
+                }
+            }
+        }
+    }
+}
+
 pub struct TyConsGenPass {
     cxt: Cxt<String, Ty>,
     ty_table: HashMap<String, TyDecl>,
@@ -331,7 +1037,7 @@ impl TyConsGenPass {
                 if self.occurs_in(*i, rhs) {
                     let err = ErrKind::Type(TypeErr::InfRec(lhs.clone(), rhs.clone()));
                     // FIXME(Simon): use ty instead of tykind to report errors properly
-                    self.span_err(err, lhs.span);
+                    self.span_err(err, lhs.span.clone());
                 } else {
                     self.subst[*i] = rhs.clone();
                 }
@@ -340,7 +1046,7 @@ impl TyConsGenPass {
                 if self.occurs_in(*i, lhs) {
                     let err = ErrKind::Type(TypeErr::InfRec(lhs.clone(), rhs.clone()));
                     // FIXME(Simon): use ty instead of tykind to report errors properly
-                    self.span_err(err, lhs.span);
+                    self.span_err(err, lhs.span.clone());
                 } else {
                     self.subst[*i] = lhs.clone();
                 }
@@ -349,7 +1055,7 @@ impl TyConsGenPass {
             (TyKind::Tup(lt), TyKind::Tup(rt)) => {
                 if lt.len() != rt.len() {
                     let err = ErrKind::Type(TypeErr::GenericsMismatch(lhs.clone(), rhs.clone()));
-                    self.span_err(err, lhs.span);
+                    self.span_err(err, lhs.span.clone());
                 } else {
                     lt.iter()
                         .zip(rt.iter())
@@ -359,7 +1065,7 @@ impl TyConsGenPass {
             (TyKind::Fn(lp, l_ret), TyKind::Fn(rp, r_ret)) => {
                 if lp.len() != rp.len() {
                     let err = ErrKind::Type(TypeErr::GenericsMismatch(lhs.clone(), rhs.clone()));
-                    self.span_err(err, lhs.span);
+                    self.span_err(err, lhs.span.clone());
                 } else {
                     lp.iter()
                         .zip(rp.iter())
@@ -371,9 +1077,13 @@ impl TyConsGenPass {
             | (TyKind::Text, TyKind::Text)
             | (TyKind::Num, TyKind::Num) => {}
             _ => {
+                // TODO(Simon): is the order of actual vs expected still right?
                 self.span_err(
-                    ErrKind::Type(TypeErr::InvalidType(lhs.clone(), rhs.clone())),
-                    rhs.span,
+                    ErrKind::Type(TypeErr::InvalidType {
+                        expected: lhs.kind.clone(),
+                        actual: rhs.clone(),
+                    }),
+                    rhs.span.clone(),
                 );
             }
         };
@@ -411,14 +1121,14 @@ impl TyConsGenPass {
                     s.name.lexeme.clone(),
                     Ty {
                         kind: TyKind::Struct(s.clone()),
-                        span: s.span,
+                        span: s.span.clone(),
                     },
                 ),
                 Decl::TyDecl(TyDecl::Enum(e)) => self.cxt.insert_global(
                     e.name.lexeme.clone(),
                     Ty {
                         kind: TyKind::Enum(e.clone()),
-                        span: e.span,
+                        span: e.span.clone(),
                     },
                 ),
                 Decl::Fn(f) => {
@@ -428,7 +1138,7 @@ impl TyConsGenPass {
                         name.clone(),
                         Ty {
                             kind: TyKind::Fn(params, f.header.ret_ty.clone()),
-                            span: f.span,
+                            span: f.span.clone(),
                         },
                     )
                 }
@@ -456,7 +1166,7 @@ impl TyConsGenPass {
         for stmt in &mut block.stmts {
             match stmt {
                 Stmt::Ret(ref mut e, _) => {
-                    e.ty = self.new_id(e.span);
+                    e.ty = self.new_id(e.span.clone());
                     self.cons.push(Constraint::Eq(e.ty.clone(), ret_ty.clone()));
                 }
                 Stmt::If {
@@ -536,7 +1246,7 @@ impl TyConsGenPass {
                 ref rhs,
             } => {
                 let lhs = self.infer(lhs)?;
-                let sp = lhs.span;
+                let sp = lhs.span.clone();
                 self.cons.push(Constraint::Eq(
                     lhs,
                     Ty {
@@ -545,7 +1255,7 @@ impl TyConsGenPass {
                     },
                 ));
                 let rhs = self.infer(rhs)?;
-                let sp = rhs.span;
+                let sp = rhs.span.clone();
                 self.cons.push(Constraint::Eq(
                     rhs,
                     Ty {
@@ -555,7 +1265,7 @@ impl TyConsGenPass {
                 ));
                 Ok(Ty {
                     kind: TyKind::Num,
-                    span: e.span,
+                    span: e.span.clone(),
                 })
             }
             ExprKind::Logical {
@@ -571,19 +1281,19 @@ impl TyConsGenPass {
                             lhs.clone(),
                             Ty {
                                 kind: TyKind::Bool,
-                                span: lhs.span,
+                                span: lhs.span.clone(),
                             },
                         ));
                         self.cons.push(Constraint::Eq(
                             rhs.clone(),
                             Ty {
                                 kind: TyKind::Bool,
-                                span: rhs.span,
+                                span: rhs.span.clone(),
                             },
                         ));
                         Ok(Ty {
                             kind: TyKind::Bool,
-                            span: e.span,
+                            span: e.span.clone(),
                         })
                     }
                     CmpOp::Greater | CmpOp::GreaterEq | CmpOp::Less | CmpOp::LessEq => {
@@ -591,26 +1301,26 @@ impl TyConsGenPass {
                             lhs.clone(),
                             Ty {
                                 kind: TyKind::Num,
-                                span: lhs.span,
+                                span: lhs.span.clone(),
                             },
                         ));
                         self.cons.push(Constraint::Eq(
                             rhs.clone(),
                             Ty {
                                 kind: TyKind::Num,
-                                span: lhs.span,
+                                span: lhs.span.clone(),
                             },
                         ));
                         Ok(Ty {
                             kind: TyKind::Num,
-                            span: e.span,
+                            span: e.span.clone(),
                         })
                     }
                     CmpOp::EqEq | CmpOp::NotEq => {
                         self.cons.push(Constraint::Eq(lhs, rhs));
                         Ok(Ty {
                             kind: TyKind::Bool,
-                            span: e.span,
+                            span: e.span.clone(),
                         })
                     }
                 }
@@ -623,7 +1333,7 @@ impl TyConsGenPass {
                 };
                 let res = Ty {
                     kind: tk,
-                    span: e.span,
+                    span: e.span.clone(),
                 };
                 self.cons.push(Constraint::Eq(rhs, res.clone()));
                 Ok(res)
@@ -631,14 +1341,14 @@ impl TyConsGenPass {
             ExprKind::Array(ref arr) => {
                 let first_tk = match arr.first() {
                     Some(e) => self.infer(e)?,
-                    None => self.new_id(e.span),
+                    None => self.new_id(e.span.clone()),
                 };
                 let elem_ty = Ty {
                     kind: TyKind::Array(box Ty {
                         kind: first_tk.kind.clone(),
-                        span: e.span,
+                        span: e.span.clone(),
                     }),
-                    span: first_tk.span,
+                    span: first_tk.span.clone(),
                 };
                 for elem in arr {
                     let tk = self.infer(elem)?;
@@ -653,12 +1363,12 @@ impl TyConsGenPass {
                 }
                 Ok(Ty {
                     kind: TyKind::Tup(t),
-                    span: e.span,
+                    span: e.span.clone(),
                 })
             }
             ExprKind::Path(ref path) => {
                 if path.len() != 2 {
-                    return Err(self.span_err(ErrKind::Internal("Typenpfade mit mehr als 2 Segmenten um zum Beispiel #benuzte stmts zu ersetzen sind zum aktuellen Zeitpunkt noch nicht unterstuezt!".to_string()), path.span));
+                    return Err(self.span_err(ErrKind::Internal("Typenpfade mit mehr als 2 Segmenten um zum Beispiel #benuzte stmts zu ersetzen sind zum aktuellen Zeitpunkt noch nicht unterstuezt!".to_string()), path.span.clone()));
                 }
                 let ty_name = path.first().unwrap();
                 let fn_name = path.segments.get(1).unwrap();
@@ -672,18 +1382,18 @@ impl TyConsGenPass {
                                             ty_name: path.first().unwrap().lexeme.clone(),
                                             fn_name: fn_name.lexeme.clone(),
                                         }),
-                                        fn_name.span,
+                                        fn_name.span.clone(),
                                     ));
                                 } else {
                                     return Ok(Ty {
                                         kind: fun.into(),
-                                        span: fn_name.span,
+                                        span: fn_name.span.clone(),
                                     });
                                 }
                             }
                             Ok(Ty {
                                 kind: fun.into(),
-                                span: fn_name.span,
+                                span: fn_name.span.clone(),
                             })
                         } else {
                             Err(self.span_err(
@@ -691,13 +1401,13 @@ impl TyConsGenPass {
                                     ty_name: ty_name.lexeme.clone(),
                                     fn_name: fn_name.lexeme.clone(),
                                 }),
-                                fn_name.span,
+                                fn_name.span.clone(),
                             ))
                         }
                     }
                     None => Err(self.span_err(
                         ErrKind::Type(TypeErr::TyNotFound(path.first().unwrap().lexeme.clone())),
-                        path.first().unwrap().span,
+                        path.first().unwrap().span.clone(),
                     )),
                 }
             }
@@ -708,23 +1418,23 @@ impl TyConsGenPass {
             ExprKind::Range(ref from, ref to) => {
                 let ty = Ty {
                     kind: TyKind::Num,
-                    span: from.span.combine(&to.span),
+                    span: from.span.clone().combine(&to.span.clone()),
                 };
                 Ok(Ty {
                     kind: TyKind::Array(Box::new(ty)),
-                    span: e.span,
+                    span: e.span.clone(),
                 })
             }
             ExprKind::Lit(ref lit) => Ok(Ty {
                 kind: Self::infer_lit(lit),
-                span: e.span,
+                span: e.span.clone(),
             }),
             ExprKind::Index {
                 ref callee,
                 ref index,
             } => {
                 let index = self.infer(index)?;
-                let span = index.span;
+                let span = index.span.clone();
                 let callee_ty = self.infer(callee)?;
                 self.cons.push(Constraint::Eq(
                     index,
@@ -734,8 +1444,8 @@ impl TyConsGenPass {
                     },
                 ));
                 let arr = Ty {
-                    kind: TyKind::Array(box self.new_id(e.span)),
-                    span: e.span,
+                    kind: TyKind::Array(box self.new_id(e.span.clone())),
+                    span: e.span.clone(),
                 };
                 self.cons.push(Constraint::Eq(callee_ty, arr.clone()));
                 Ok(arr)
@@ -744,7 +1454,7 @@ impl TyConsGenPass {
                 Some(t) => Ok(t.clone()),
                 None => Err(Diagnostic {
                     kind: ErrKind::Type(TypeErr::VarNotFound(var.lexeme.clone())),
-                    span: var.span,
+                    span: var.span.clone(),
                     suggestions: Vec::new(),
                 }),
             },
@@ -757,10 +1467,10 @@ impl TyConsGenPass {
                 for arg in args.iter() {
                     args_buf.push(self.infer(arg)?);
                 }
-                let id = self.new_id(e.span);
+                let id = self.new_id(e.span.clone());
                 let f_ty = Ty {
                     kind: TyKind::Fn(args_buf, box id.clone()),
-                    span: e.span,
+                    span: e.span.clone(),
                 };
                 self.cons.push(Constraint::Eq(f_ty, callee_ty));
                 Ok(id)
@@ -769,9 +1479,9 @@ impl TyConsGenPass {
             ExprKind::Intrinsic { ref kind, args: _ } => match kind {
                 Intrinsic::Format | Intrinsic::Read => Ok(Ty {
                     kind: TyKind::Text,
-                    span: e.span,
+                    span: e.span.clone(),
                 }),
-                Intrinsic::Print | Intrinsic::Write => Ok(Ty::default_unit_type(e.span)),
+                Intrinsic::Print | Intrinsic::Write => Ok(Ty::default_unit_type(e.span.clone())),
             },
             ExprKind::Field(ref callee, ref field) => {
                 todo!();
@@ -806,19 +1516,19 @@ impl TyConsGenPass {
                     }
                     Ok(Ty {
                         kind: TyKind::Struct(s),
-                        span: name.span,
+                        span: name.span.clone(),
                     })
                 } else {
                     let err = ErrKind::Type(TypeErr::TyNotFound(str_name));
                     // TODO(Simon): provide suggestions which type might be meant
-                    Err(self.span_err(err, name.span))
+                    Err(self.span_err(err, name.span.clone()))
                 }
             }
 
             _ => {
                 let err = ErrKind::Type(TypeErr::TyNotFound(str_name));
                 // TODO(Simon): provide suggestions which type might be meant
-                Err(self.span_err(err, name.span))
+                Err(self.span_err(err, name.span.clone()))
             }
         }
     }
@@ -830,7 +1540,7 @@ impl TyConsGenPass {
             if !fields.insert(&member.name.lexeme) {
                 return Err(Diagnostic {
                     kind: ErrKind::Type(TypeErr::DuplicateLitField(member.name.lexeme.clone())),
-                    span: member.span,
+                    span: member.span.clone(),
                     suggestions: vec![
                         "Versuche das doppelte Feld in dem Strukturliteral zu entfernen!"
                             .to_string(),
@@ -852,7 +1562,7 @@ impl TyConsGenPass {
                             s.name.lexeme.clone(),
                             field.lexeme.clone(),
                         )),
-                        member.span,
+                        member.span.clone(),
                     );
                 }
                 Some(_) => continue,
@@ -861,7 +1571,7 @@ impl TyConsGenPass {
 
         for (name, _) in s.fields {
             let err = ErrKind::Type(TypeErr::MissingField(name.lexeme.clone()));
-            self.span_err(err, name.span);
+            self.span_err(err, name.span.clone());
         }
     }
 
@@ -882,7 +1592,7 @@ impl TyConsGenPass {
 
     fn link_cons(&mut self, e: &Expr) {
         let tk = self.infer(&e).unwrap();
-        let id = self.new_id(e.span);
+        let id = self.new_id(e.span.clone());
         self.cons.push(Constraint::Eq(tk, id));
     }
 
@@ -906,7 +1616,7 @@ impl Visitor for TyConsGenPass {
         match stmt {
             Stmt::VarDef(ref mut vd) => {
                 let tk = match vd.ty.kind {
-                    TyKind::Infer => self.new_id(vd.pat.span),
+                    TyKind::Infer => self.new_id(vd.pat.span.clone()),
                     _ => {
                         vd.ty.infer_internal();
                         vd.ty.clone()
@@ -953,7 +1663,7 @@ impl Visitor for TyConsGenPass {
                 self.cons.push(Constraint::Eq(
                     Ty {
                         kind: TyKind::Bool,
-                        span: cond.span,
+                        span: cond.span.clone(),
                     },
                     cond.ty.clone(),
                 ));
@@ -971,7 +1681,7 @@ impl Visitor for TyConsGenPass {
                     cond.ty.clone(),
                     Ty {
                         kind: TyKind::Bool,
-                        span: cond.span,
+                        span: cond.span.clone(),
                     },
                 ));
                 self.infer_block(body)?;
@@ -982,7 +1692,7 @@ impl Visitor for TyConsGenPass {
                         branch.cond.ty.clone(),
                         Ty {
                             kind: TyKind::Bool,
-                            span: branch.cond.span,
+                            span: branch.cond.span.clone(),
                         },
                     ));
                     self.infer_block(&mut branch.body)?;
@@ -1062,7 +1772,7 @@ impl Visitor for TyConsGenPass {
         }
 
         let tk = self.infer(&expr)?;
-        let id = self.new_id(expr.span);
+        let id = self.new_id(expr.span.clone());
         expr.ty = id.clone();
         self.cons.push(Constraint::Eq(tk, id));
         Ok(())
@@ -1096,12 +1806,12 @@ impl TypeSubstitutor {
                 }
                 Ty {
                     kind: TyKind::Tup(subst_tup),
-                    span: t.span,
+                    span: t.span.clone(),
                 }
             }
             TyKind::Array(ref elem) => Ty {
                 kind: TyKind::Array(box self.subst(elem)),
-                span: t.span,
+                span: t.span.clone(),
             },
             _ => t.clone(),
         }
