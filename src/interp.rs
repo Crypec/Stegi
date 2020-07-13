@@ -7,6 +7,7 @@ use dyn_fmt::*;
 
 use crate::errors::*;
 use crate::lexer::Lit;
+use crate::typer::TyKind;
 use std::collections::HashMap;
 use std::io::prelude::*;
 
@@ -133,8 +134,8 @@ impl Interp {
 
     fn call_fn(&mut self, callee: &mut Expr, args: &Vec<Expr>) -> Result<Value, Diagnostic> {
         let mut args = args.clone();
-        if let ExprKind::Field(..) = callee.node {
-            args.push(callee.clone());
+        if let ExprKind::Field(call_arg, _) = &callee.node {
+            args.insert(0, *call_arg.clone());
         }
 
         let callee = self.eval(callee)?;
@@ -267,16 +268,40 @@ impl Interp {
                 } else if *op == CmpOp::NotEq {
                     return Ok(Value::Bool(self.eval(lhs)? != self.eval(rhs)?));
                 };
-                let lhs = cast!(self.eval(lhs)?, Value::Bool);
-                let rhs = cast!(self.eval(rhs)?, Value::Bool);
+
                 let res = match op {
-                    CmpOp::And => lhs && rhs,
-                    CmpOp::Or => lhs || rhs,
-                    CmpOp::GreaterEq => lhs >= rhs,
-                    CmpOp::Greater => lhs > rhs,
-                    CmpOp::Less => lhs < rhs,
-                    CmpOp::LessEq => lhs <= rhs,
-                    _ => unreachable!("Covered by the if beforehand!"),
+                    CmpOp::And => {
+                        let lhs = cast!(self.eval(lhs)?, Value::Bool);
+                        let rhs = cast!(self.eval(rhs)?, Value::Bool);
+                        lhs && rhs
+                    }
+                    CmpOp::Or => {
+                        let lhs = cast!(self.eval(lhs)?, Value::Bool);
+                        let rhs = cast!(self.eval(rhs)?, Value::Bool);
+                        lhs || rhs
+                    }
+                    CmpOp::Greater => {
+                        let lhs = cast!(self.eval(lhs)?, Value::Num);
+                        let rhs = cast!(self.eval(rhs)?, Value::Num);
+                        lhs > rhs
+                    }
+                    CmpOp::GreaterEq => {
+                        let lhs = cast!(self.eval(lhs)?, Value::Num);
+                        let rhs = cast!(self.eval(rhs)?, Value::Num);
+                        lhs >= rhs
+                    }
+                    CmpOp::Less => {
+                        let lhs = cast!(self.eval(lhs)?, Value::Num);
+                        let rhs = cast!(self.eval(rhs)?, Value::Num);
+                        lhs < rhs
+                    }
+                    CmpOp::LessEq => {
+                        let lhs = cast!(self.eval(lhs)?, Value::Num);
+                        let rhs = cast!(self.eval(rhs)?, Value::Num);
+                        lhs <= rhs
+                    }
+                    CmpOp::EqEq => self.eval(rhs)? == self.eval(lhs)?,
+                    CmpOp::NotEq => self.eval(rhs)? != self.eval(lhs)?,
                 };
                 Ok(Value::Bool(res))
             }
@@ -341,7 +366,23 @@ impl Interp {
             }
             ExprKind::Field(ref callee, ref name) => {
                 let (_, obj) = cast!(self.eval(&callee)?, Value::Object);
-                Ok(obj.get(&name.lexeme).expect("Field not found!").clone())
+                match obj.get(&name.lexeme) {
+                    Some(val) => Ok(val.clone()),
+                    None => {
+                        if let TyKind::Path(p) = &callee.ty.kind {
+                            let first = p.first().unwrap();
+                            Ok(Value::Fn(
+                                self.ty_table
+                                    .get(&first.lexeme)
+                                    .expect("Type not found")
+                                    .get_method(&name.lexeme)
+                                    .expect("method not found"),
+                            ))
+                        } else {
+                            panic!("Object cannot have methods");
+                        }
+                    }
+                }
             }
             ExprKind::Path(ref p) => {
                 let ty_name = &p.first().unwrap().lexeme;

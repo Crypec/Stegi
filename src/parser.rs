@@ -639,7 +639,7 @@ impl Parser {
         Ok(Struct {
             name,
             fields,
-            methods: Vec::new(),
+            methods: HashMap::new(),
             span: start.combine(&end),
         })
     }
@@ -672,7 +672,7 @@ impl Parser {
         Ok(Enum {
             name,
             variants,
-            methods: Vec::new(),
+            methods: HashMap::new(),
             span: start.combine(&end),
         })
     }

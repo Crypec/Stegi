@@ -169,8 +169,7 @@ pub struct Struct {
     pub name: Ident,
 
     pub fields: HashMap<Ident, Ty>,
-    pub methods: Vec<FnDecl>,
-
+    pub methods: HashMap<String, FnDecl>,
     #[derivative(Debug = "ignore")]
     pub span: Span,
 }
@@ -180,7 +179,7 @@ pub struct Struct {
 pub struct Enum {
     pub name: Ident,
     pub variants: Vec<Variant>,
-    pub methods: Vec<FnDecl>,
+    pub methods: HashMap<String, FnDecl>,
 
     #[derivative(Debug = "ignore")]
     pub span: Span,
@@ -194,6 +193,10 @@ pub enum TyDecl {
 
     #[derivative(Debug = "transparent")]
     Enum(Enum),
+    // //compiler intrinsic types
+    // Num,
+    // Text,
+    // Bool,
 }
 
 impl TyDecl {
@@ -204,25 +207,17 @@ impl TyDecl {
         }
     }
 
-    pub fn add_methods(&mut self, mut methods: Vec<FnDecl>) {
+    pub fn add_methods(&mut self, methods: HashMap<String, FnDecl>) {
         match self {
-            TyDecl::Enum(e) => e.methods.append(&mut methods),
-            TyDecl::Struct(s) => s.methods.append(&mut methods),
+            TyDecl::Enum(e) => e.methods.extend(methods.into_iter()),
+            TyDecl::Struct(s) => s.methods.extend(methods.into_iter()),
         }
     }
 
     pub fn get_method(&self, name: &str) -> Option<FnDecl> {
         match self {
-            TyDecl::Struct(s) => s
-                .methods
-                .iter()
-                .find(|m| m.header.name.lexeme == name)
-                .cloned(),
-            TyDecl::Enum(e) => e
-                .methods
-                .iter()
-                .find(|m| m.header.name.lexeme == name)
-                .cloned(),
+            TyDecl::Struct(s) => s.methods.get(name).cloned(),
+            TyDecl::Enum(e) => e.methods.get(name).cloned(),
         }
     }
 }
@@ -239,6 +234,12 @@ impl Into<TyKind> for FnDecl {
     fn into(self) -> TyKind {
         let params = self.header.params.iter().map(|p| p.ty.clone()).collect();
         TyKind::Fn(params, self.header.ret_ty)
+    }
+}
+impl Into<TyKind> for &FnDecl {
+    fn into(self) -> TyKind {
+        let params = self.header.params.iter().map(|p| p.ty.clone()).collect();
+        TyKind::Fn(params, self.header.ret_ty.clone())
     }
 }
 
@@ -393,15 +394,15 @@ impl ASTNode for Stmt {
     }
 }
 
-#[derive(Derivative)]
-#[derivative(Debug)]
-pub struct EnumDecl {
-    pub ident: Ident,
-    pub variants: Vec<Variant>,
+// #[derive(Derivative)]
+// #[derivative(Debug)]
+// pub struct EnumDecl {
+//     pub ident: Ident,
+//     pub variants: Vec<Variant>,
 
-    #[derivative(Debug = "ignore")]
-    pub span: Span,
-}
+//     #[derivative(Debug = "ignore")]
+//     pub span: Span,
+// }
 
 #[derive(Clone, PartialEq, Derivative)]
 #[derivative(Debug)]
@@ -460,12 +461,6 @@ impl Param {
     }
 }
 
-impl Struct {
-    pub fn add_methods(&mut self, mut methods: Vec<FnDecl>) {
-        self.methods.append(&mut methods);
-    }
-}
-
 #[derive(Clone, Derivative)]
 #[derivative(Debug)]
 pub struct Field {
@@ -477,7 +472,7 @@ pub struct Field {
 }
 
 #[derive(Derivative)]
-#[derivative(Debug, PartialEq, Hash, Clone)]
+#[derivative(Debug, Hash, PartialEq, Clone)]
 pub struct Ident {
     pub lexeme: String,
 
@@ -687,7 +682,7 @@ pub struct Call {
     pub args: Vec<Expr>,
 }
 
-#[derive(Hash, Debug, Clone)]
+#[derive(Debug, Hash, Clone)]
 pub struct Span {
     pub lo: usize,
     pub hi: usize,

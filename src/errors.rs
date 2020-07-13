@@ -85,50 +85,34 @@ fn fmt_tk_vec(tks: &Vec<TokenKind>) -> String {
 pub enum TypeErr {
     VarNotFound(String),
     TyNotFound(String),
-    InvalidType {
-        expected: TyKind,
-        actual: Ty,
-    },
+    InvalidType { expected: TyKind, actual: Ty },
     // TODO(Simon): this should really be a ty instead of just a tykind, we need the span to do proper error reporting
     InfRec(Ty, Ty),
     DuplicateLitField(String),
     MissingField(String),
     InvalidField(String, String),
-    FieldNotFound {
-        ty: TyKind,
-        field: String,
-    },
+    FieldNotFound { ty: TyKind, field: String },
     GenericsMismatch(Ty, Ty),
-    NonStaticCall {
-        ty_name: String,
-        fn_name: String,
-    },
-    StaticFnNotFound {
-        ty_name: String,
-        fn_name: String,
-    },
-    Parity {
-        name: String,
-        expected: usize,
-        actual: usize,
-    },
+    NonStaticCall { ty_name: String, fn_name: String },
+    StaticFnNotFound { ty_name: String, fn_name: String },
+    Parity { expected: usize, actual: usize },
 }
 
 impl fmt::Display for TypeErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self{
             TypeErr:: VarNotFound(varname) => write!(f, "Diese Variable `{}` haben wir nicht gefunden. Bitte Definiere und Initialisiere sie, bevor du sie benutzt.", varname),
-            TypeErr::InvalidType{expected, actual}=> write!(f, "Du hast hier einen Typ benutzt der entweder gar nicht existiert oder hier nicht funktioniert. Bitte schau da nochmal drüber. Erwartet: {} => Gefunden: {}", expected, actual),
+            TypeErr::InvalidType{expected, actual}=> write!(f, "Unerwarteter Typ '{}' gefunden erwartet haben wir '{}'", actual, expected),
             TypeErr::InfRec(a, b) => write!(f, "Unendlich rekursiver Typ entdeckt! Typ: {}, kommt in {} vor!!!", a, b),
-            TypeErr::FieldNotFound{ty, field} => write!(f, "Der Datentyp {} hat kein Feld mit dem Namen {}!", ty, field),
+            TypeErr::FieldNotFound{ty, field} => write!(f, "Der Datentyp {} hat kein Feld mit dem Namen '{}'!", ty, field),
 			TypeErr::TyNotFound(t) => write!(f, "Keine Defintion fuer den Datentyp {} gefunden", t),
 			TypeErr::DuplicateLitField(field) => write!(f, "Jedes Feld eines Objektes kann nur einmal vorkommen, '{}' kommt dabei allerdings mehr als einmal vor!", field),
 			TypeErr::MissingField(field) => write!(f, "Du hast vergessen dem Feld {} einen Wert zu geben!", field),
-			TypeErr::InvalidField(ty, field) => write!(f, "Der Datentyp: {} hat kein Feld mit dem Namen: {}!", ty, field),
+			TypeErr::InvalidField(ty, field) => write!(f, "Der Datentyp: {} hat kein Feld mit dem Namen: '{}'!", ty, field),
 			TypeErr::GenericsMismatch(lhs, rhs) => write!(f, "An dieser Stelle haben wir {} erwartet, aber {} gefunden!", lhs, rhs),
 			TypeErr::NonStaticCall{ty_name, fn_name} => write!(f, "Die Funktion: {} des Datentypen {}, ist nicht statisch! Der 'selbst' Paramter ist fuer statische Funktionen nicht erlaubt!", fn_name, ty_name),
 			TypeErr::StaticFnNotFound{ty_name, fn_name} => write!(f, "Der Datentyp {} hat keine statische Funktion mit dem Namen {}!", ty_name, fn_name),
-			TypeErr::Parity{ref name, expected, actual} => write!(f, "Die Anzahl der Argumente fuer die Funktion {} stimmt nicht mit der in der Definition angegebenden ueberein. Erwartet: {} => Gefunden: {}", name, expected, actual),
+			TypeErr::Parity{expected, actual} => write!(f, "Die Anzahl der Argumente im Aufruf der Funktion stimmt nicht mit der in der Definition angegebenden ueberein. Erwartet: {} => Gefunden: {}", expected, actual),
 
         } //torben
     }
@@ -168,10 +152,9 @@ impl Diagnostic {
             span,
         }
     }
-    pub fn suggest<S: Into<String>>(self, sug: S) -> Self {
-        let mut diag = self;
-        diag.suggestions.push(sug.into());
-        diag
+    pub fn suggest<S: Into<String>>(&mut self, sug: S) -> &mut Self {
+        self.suggestions.push(sug.into());
+        self
     }
 
     #[allow(dead_code)]
@@ -246,6 +229,16 @@ impl Diagnostic {
         }
     }
 
+    fn get_kind(&self) -> &str {
+        match self.kind {
+            ErrKind::Warning { .. } => "Warnung",
+            ErrKind::Internal(_) => "interner Fehler",
+            ErrKind::Runtime(..) => "Laufzeitfehler",
+            ErrKind::Syntax(..) => "Syntaxfehler",
+            ErrKind::Type(..) => "Typenfehler",
+        }
+    }
+
     // fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
     //     dbg!(self.span);
     // }
@@ -257,17 +250,13 @@ impl fmt::Display for Diagnostic {
         let msg = format!("{}", self.kind).color(color).bold();
         writeln!(
             f,
-            "{} {} {}[{}]",
+            "{} [{}] {}[{}]",
             "--".bold(),
-            msg,
+            self.get_kind().bold().color(color),
             "------------------------------------------".bold(),
             self.span.file.to_str().unwrap().blue()
         )?;
-
-        println!(
-            "{}",
-            self.get_src_file().unwrap()[self.span.lo..self.span.hi].to_string()
-        );
+        write!(f, "\n{} {}", "->".bold(), msg);
 
         let line_str = format!(" {} |", self.line_num().unwrap());
 
@@ -286,14 +275,14 @@ impl fmt::Display for Diagnostic {
             a = align,
             u = self.span.lo - self.line_span().unwrap().lo + u_line.len()
         )?;
-        writeln!(
-            f,
-            "{:>a$} {}: {}",
-            "|",
-            "Hilfe".bold().underline(),
-            self.kind,
-            a = align
-        )?;
+        // writeln!(
+        //     f,
+        //     "{:>a$} {}: {}",
+        //     "|",
+        //     "Hilfe".bold().underline(),
+        //     self.kind,
+        //     a = align
+        // )?;
 
         writeln!(f, "")?;
         for sug in &self.suggestions {
