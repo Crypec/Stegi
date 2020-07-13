@@ -15,7 +15,7 @@ use itertools::Itertools;
 use crate::ast::*;
 use crate::errors::Diagnostic;
 
-macro_rules! is_type(
+macro_rules! matches(
     ($val:expr, $p:pat) => {
         match $val {
             $p => true,
@@ -497,7 +497,7 @@ impl Visitor for TyInferencePrePass {
                 ..
             } => {
                 self.infer_expr(&mut vardef.init);
-                if !is_type!(vardef.init.ty.kind, TyKind::Array(_)) {
+                if !matches!(vardef.init.ty.kind, TyKind::Array(_)) {
                     self.span_err(
                         TypeErr::InvalidType {
                             expected: TyKind::empty_array_ty(Span::default()),
@@ -520,7 +520,7 @@ impl Visitor for TyInferencePrePass {
                 ..
             } => {
                 self.infer_expr(cond);
-                if !is_type!(cond.ty.kind, TyKind::Bool) {
+                if !matches!(cond.ty.kind, TyKind::Bool) {
                     self.span_err(
                         TypeErr::InvalidType {
                             expected: TyKind::Bool,
@@ -532,7 +532,7 @@ impl Visitor for TyInferencePrePass {
                 self.infer_block(body);
                 for branch in else_branches {
                     self.infer_expr(&mut branch.cond);
-                    if !is_type!(cond.ty.kind, TyKind::Bool) {
+                    if !matches!(cond.ty.kind, TyKind::Bool) {
                         self.span_err(
                             TypeErr::InvalidType {
                                 expected: TyKind::Bool,
@@ -554,7 +554,7 @@ impl Visitor for TyInferencePrePass {
                 ..
             } => {
                 self.infer_expr(cond);
-                if !is_type!(cond.ty.kind, TyKind::Bool) {
+                if !matches!(cond.ty.kind, TyKind::Bool) {
                     self.span_err(
                         TypeErr::InvalidType {
                             expected: TyKind::Bool,
@@ -773,7 +773,7 @@ impl Visitor for TyInferencePrePass {
                 self.infer_expr(index);
 
                 // TODO(Simon): Allow for indexing tuple types
-                if !is_type!(callee.ty.kind, TyKind::Array(_)) {
+                if !matches!(callee.ty.kind, TyKind::Array(_)) {
                     self.span_err(
                         TypeErr::InvalidType {
                             expected: TyKind::empty_array_ty(callee.span.clone()),
@@ -783,7 +783,7 @@ impl Visitor for TyInferencePrePass {
                     );
                     expr.ty.kind = TyKind::Array(box Ty::default_unit_type(callee.span.clone()))
                 }
-                if !is_type!(index.ty.kind, TyKind::Num) {
+                if !matches!(index.ty.kind, TyKind::Num) {
                     self.span_err(
                         TypeErr::InvalidType {
                             expected: TyKind::empty_array_ty(callee.span.clone()),
@@ -842,7 +842,7 @@ impl Visitor for TyInferencePrePass {
                 // TODO(Simon): check parameter names
                 args.iter_mut().for_each(|arg| self.infer_expr(arg));
                 self.infer_expr(callee);
-                if !is_type!(callee.ty.kind, TyKind::Fn(_, _)) {
+                if !matches!(callee.ty.kind, TyKind::Fn(_, _)) {
                     let arg_types = args.iter().map(|arg| arg.ty.clone()).collect();
                     self.span_err(
                         TypeErr::InvalidType {
@@ -875,7 +875,7 @@ impl Visitor for TyInferencePrePass {
                             return;
                         } else {
                             let fmter = args.first().unwrap();
-                            if !is_type!(fmter.ty.kind, TyKind::Text) {
+                            if !matches!(fmter.ty.kind, TyKind::Text) {
                                 self.span_err(
                                     TypeErr::InvalidType {
                                         expected: TyKind::Text,
@@ -886,7 +886,20 @@ impl Visitor for TyInferencePrePass {
                             }
                         }
                     }
-                    Intrinsic::Print => {}
+                    Intrinsic::Print => {
+                        if args.len() != 0 {
+                            let first = args.first().unwrap();
+                            if !matches!(first.ty.kind, TyKind::Text) {
+                                self.span_err(
+                                    TypeErr::InvalidType {
+                                        expected: TyKind::Text,
+                                        actual: first.ty.clone(),
+                                    },
+                                    first.span.clone(),
+                                )
+                            }
+                        }
+                    }
                     _ => todo!(),
                 }
             }

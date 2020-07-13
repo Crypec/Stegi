@@ -1,4 +1,5 @@
 use std::fmt;
+use std::io;
 
 use crate::ast::Span;
 use crate::lexer::TokenKind;
@@ -59,7 +60,7 @@ impl fmt::Display for SyntaxErr {
             SyntaxErr::UnexpectedChar(c) => write!(f, "Wir denken das Zeichen : ´{}´ gehört dort nicht hin.", c),
             SyntaxErr::UnterminatedString => write!(f, "Wir denken du hast vergessen einen Text zu schließen."),
             SyntaxErr::SelfOutsideImpl => write!(f, "Du hast vergessen die Methode in einen Implementierungsblock zu schreiben. Versuche die Funktion in einen Implementierungsblock zu schreiben."),
-            SyntaxErr::MissingToken{expected, actual} => write!(f, "Wir haben hier eher ´{:?}´ erwartet, als {}. Versuche doch {:?} durch {} zu ersetzen.", expected, actual, expected, actual),
+            SyntaxErr::MissingToken{expected, actual} => write!(f, "Wir haben hier eher ´{}´ erwartet, als {}. Versuche doch {} durch {} zu ersetzen.", fmt_tk_vec(expected), actual, actual, fmt_tk_vec(expected)),
             SyntaxErr::ExpectedTy => write!(f, "An dieser Stelle haben wir einen Datentypen erwartet!"),
             SyntaxErr::ExpectedExpr => write!(f, "An dieser Stelle haben wir einen mathematischen Ausdurck erwartet!"),
             SyntaxErr::InvalidAssignmentTarget => write!(f, "Der folgende Ausdruck ist nicht als Zuweisungsziel erlaubt."),
@@ -69,6 +70,15 @@ impl fmt::Display for SyntaxErr {
             SyntaxErr::UnexpectedEOF => write!(f, "Wir haben unerwartet das Ende der Datei erreicht! Schau bitte, dass du dein Code vollständig schreibst und richtig abschließt!")
         } //Torben
     }
+}
+
+fn fmt_tk_vec(tks: &Vec<TokenKind>) -> String {
+    let arr = tks
+        .iter()
+        .map(|t| format!("{}", t))
+        .collect::<Vec<String>>()
+        .join(",");
+    format!("[{}]", arr)
 }
 
 #[derive(Debug, Clone)]
@@ -174,109 +184,121 @@ impl Diagnostic {
         (0..=buf_len).map(|_| "^").collect::<String>()
     }
 
-    // fn span_snippet(&self) -> String {
-    //     let s = self.line_span();
-    //     let buf = &self.src_map.buf;
-    //     buf[s.lo..s.hi].trim_start().to_string()
-    // }
+    fn get_src_file(&self) -> io::Result<String> {
+        std::fs::read_to_string(&self.span.file)
+    }
 
-    // fn line_span(&self) -> Span {
-    //     // FIXME(Simon): I haven't tested this, but it seems like this is going to work only on linux with the current solution
-    //     // FIXME(Simon): because windows uses not only a '\n' as a newline char but combines it with a '\r'
-    //     let mut line_offsets = vec![0];
-    //     line_offsets.extend(
-    //         self.src_map
-    //             .buf
-    //             .char_indices()
-    //             .filter(|(_, c)| *c == '\n')
-    //             .map(|(i, _)| i)
-    //             .collect::<Vec<usize>>(),
-    //     );
-    //     /*
-    //     assert!(
-    //         self.span.hi <= *line_offsets.last().unwrap(),
-    //         "`hi` marker of span is outside of file"
-    //     );
-    //     */
-    //     let mut it = line_offsets.into_iter().peekable();
-    //     let mut lo = 0;
-    //     while let Some(offset) = it.next() {
-    //         if offset == self.span.lo || *it.peek().unwrap() >= self.span.lo {
-    //             lo = offset;
-    //             break;
-    //         }
-    //     }
-    //     let hi = it.next().unwrap();
-    //     let (lo, _) = self
-    //         .src_map
-    //         .buf
-    //         .char_indices()
-    //         .skip(lo)
-    //         .find(|(_, c)| !c.is_whitespace())
-    //         .unwrap();
-    //     Span::new(lo, hi, self.src_map.path)
-    // }
+    fn span_snippet(&self) -> io::Result<String> {
+        let s = self.line_span()?;
+        Ok(self.get_src_file()?[s.lo..s.hi].trim_start().to_string())
+    }
 
-    // fn line_num(&self) -> usize {
-    //     self.src_map
-    //         .buf
-    //         .char_indices()
-    //         .filter(|(_, c)| *c == '\n')
-    //         .position(|(i, _)| i >= self.span.lo)
-    //         .expect("failed to compute line number of err")
-    //         + 1
-    // }
+    fn line_span(&self) -> io::Result<Span> {
+        // FIXME(Simon): I haven't tested this, but it seems like this is going to work only on linux with the current solution
+        // FIXME(Simon): because windows uses not only a '\n' as a newline char but combines it with a '\r'
+        let mut line_offsets = vec![0];
+        line_offsets.extend(
+            self.get_src_file()?
+                .char_indices()
+                .filter(|(_, c)| *c == '\n')
+                .map(|(i, _)| i)
+                .collect::<Vec<usize>>(),
+        );
+        /*
+        assert!(
+            self.span.hi <= *line_offsets.last().unwrap(),
+            "`hi` marker of span is outside of file"
+        );
+        */
+        let mut it = line_offsets.into_iter().peekable();
+        let mut lo = 0;
+        while let Some(offset) = it.next() {
+            if offset == self.span.lo || *it.peek().unwrap() >= self.span.lo {
+                lo = offset;
+                break;
+            }
+        }
+        let hi = it.next().unwrap();
+        let (lo, _) = self
+            .get_src_file()?
+            .char_indices()
+            .skip(lo)
+            .find(|(_, c)| !c.is_whitespace())
+            .unwrap();
+        Ok(Span::new(lo, hi, self.span.file.clone()))
+    }
+
+    fn line_num(&self) -> io::Result<usize> {
+        Ok(self
+            .get_src_file()?
+            .char_indices()
+            .filter(|(_, c)| *c == '\n')
+            .position(|(i, _)| i >= self.span.lo)
+            .expect("failed to compute line number of err")
+            + 1)
+    }
+
+    fn get_color(&self) -> Color {
+        match self.kind {
+            ErrKind::Warning { .. } => Color::Yellow,
+            ErrKind::Internal(_) => Color::BrightMagenta,
+            _ => Color::Red,
+        }
+    }
 
     // fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
     //     dbg!(self.span);
-    //     let line_str = format!(" {} |", self.line_num());
-
-    //     let align = line_str.len();
-    //     let u_line = self.underline();
-
-    //     writeln!(f, "{:>a$}", "|", a = align)?;
-    //     writeln!(f, "{} {}", line_str, self.span_snippet())?;
-    //     writeln!(
-    //         f,
-    //         "{:>a$} {:>u$}",
-    //         "|",
-    //         u_line.color(c).bold(),
-    //         a = align,
-    //         u = self.span.lo - self.line_span().lo + u_line.len()
-    //     )?;
-    //     writeln!(
-    //         f,
-    //         "{:>a$} {}: {}",
-    //         "|",
-    //         "Hilfe".bold().underline(),
-    //         self.kind,
-    //         a = align
-    //     )
     // }
 }
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // let color = match self.kind {
-        //     ErrKind::Warning { .. } => Color::Yellow,
-        //     ErrKind::Internal(_) => Color::BrightMagenta,
-        //     _ => Color::Red,
-        // };
-        // let msg = format!("{}", self.kind).color(color).bold();
-        // writeln!(
-        //     f,
-        //     "{} {} {}[{}]",
-        //     "--".bold(),
-        //     msg,
-        //     "------------------------------------------".bold(),
-        //     self.src_map.path.to_str().unwrap().blue()
-        // )?;
-        // writeln!(f)?;
-        // self.write_code_snippet(f, color)?;
-        // writeln!(f, "")?;
-        // for sug in &self.suggestions {
-        //     writeln!(f, " • {}", sug)?;
-        // }
-        write!(f, "{:#?}", self)
+        let color = self.get_color();
+        let msg = format!("{}", self.kind).color(color).bold();
+        writeln!(
+            f,
+            "{} {} {}[{}]",
+            "--".bold(),
+            msg,
+            "------------------------------------------".bold(),
+            self.span.file.to_str().unwrap().blue()
+        )?;
+
+        println!(
+            "{}",
+            self.get_src_file().unwrap()[self.span.lo..self.span.hi].to_string()
+        );
+
+        let line_str = format!(" {} |", self.line_num().unwrap());
+
+        let align = line_str.len();
+        let u_line = self.underline();
+
+        writeln!(f, "{:>a$}", "|", a = align)?;
+
+        writeln!(f, "{} {}", line_str, self.span_snippet().unwrap())?;
+
+        writeln!(
+            f,
+            "{:>a$} {:>u$}",
+            "|",
+            u_line.color(color).bold(),
+            a = align,
+            u = self.span.lo - self.line_span().unwrap().lo + u_line.len()
+        )?;
+        writeln!(
+            f,
+            "{:>a$} {}: {}",
+            "|",
+            "Hilfe".bold().underline(),
+            self.kind,
+            a = align
+        )?;
+
+        writeln!(f, "")?;
+        for sug in &self.suggestions {
+            writeln!(f, " • {}", sug)?;
+        }
+        writeln!(f, "")
     }
 }

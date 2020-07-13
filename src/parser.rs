@@ -17,7 +17,7 @@ type ParseResult<T> = Result<T, Diagnostic>;
 
 pub struct Parser {
     iter: MultiPeek<IntoIter<Token>>,
-    last: Option<Token>,
+    cursor: Option<Token>,
     file: PathBuf,
 }
 
@@ -90,14 +90,13 @@ impl Parser {
             iter: multipeek(i.into_iter()),
             // NOTE(Simon): this only gets used for error reporting if we unexpectedly reach the end of a file
             // NOTE(Simon): this could be `None`, but in this we don't ever try to parse anything beecause `has_next` in our iter implementation will return false and we will stop parsing
-            last,
+            cursor: last,
             file: file.clone(),
         }
     }
 
     fn sync_parser_state(&mut self) {
         loop {
-            dbg!(&self.peek_kind());
             if let Ok(tk) = self.peek_kind() {
                 match tk {
                     TokenKind::Keyword(Keyword::Struct)
@@ -144,7 +143,7 @@ impl Parser {
             TokenKind::LBrace => Ok(TyDecl::Struct(self.parse_struct()?)),
             TokenKind::Eq => Ok(TyDecl::Enum(self.parse_enum()?)),
             _ => {
-                let span = self.last.as_ref().unwrap().span.clone();
+                let span = self.cursor.as_ref().unwrap().span.clone();
                 let kind = ErrKind::Syntax(SyntaxErr::MissingToken {
                     expected: vec![TokenKind::LBrace, TokenKind::Eq],
                     actual: self.look_ahead(3)?,
@@ -257,11 +256,8 @@ impl Parser {
 
         let mut block = Vec::new();
         while self.peek_kind()? != TokenKind::RBrace {
-            let stmt = self.parse_stmt(mode);
-            if let Err(_) = stmt {
-                self.expect(TokenKind::RBrace, "Block nicht geschlossen?")?;
-            }
-            block.push(stmt?)
+            let stmt = self.parse_stmt(mode)?;
+            block.push(stmt)
         }
         let end = self
             .expect(TokenKind::RBrace, "Block nicht geschlossen?")?
@@ -405,7 +401,7 @@ impl Parser {
                 TokenKind::Eq => return Ok(Directive::Assign),
                 TokenKind::Semi => return Ok(Directive::Expr),
                 TokenKind::EOF => {
-                    let sp = self.last.as_ref().unwrap().span.clone();
+                    let sp = self.cursor.as_ref().unwrap().span.clone();
                     return Err(self.span_err(ErrKind::Syntax(SyntaxErr::UnexpectedEOF), sp));
                 }
                 _ => i += 1,
@@ -570,7 +566,7 @@ impl Parser {
                     fn_decls.push(self.parse_fn(mode)?);
                 }
                 _ => {
-                    let sp = self.last.as_ref().unwrap().span.clone();
+                    let sp = self.cursor.as_ref().unwrap().span.clone();
 
                     let expected = vec![TokenKind::Keyword(Keyword::Fun), TokenKind::RBrace];
                     let err = ErrKind::Syntax(SyntaxErr::MissingToken {
@@ -727,9 +723,9 @@ impl Parser {
     }
 
     fn parse_ty_specifier(&mut self) -> ParseResult<Ty> {
-        let start = self.last.as_ref().unwrap().span.clone();
+        let start = self.cursor.as_ref().unwrap().span.clone();
         let kind = self.parse_ty_kind()?;
-        let end = self.last.as_ref().unwrap().span.clone();
+        let end = self.cursor.as_ref().unwrap().span.clone();
         Ok(Ty {
             kind,
             span: start.combine(&end),
@@ -1244,16 +1240,20 @@ impl Parser {
         item
     }
 
+    fn cursor(&self) -> Option<Token> {
+        self.cursor.as_ref().cloned()
+    }
+
     fn advance(&mut self) -> ParseResult<Token> {
         match self.iter.next() {
             Some(t) => {
-                self.last = Some(t.clone());
+                self.cursor = Some(t.clone());
                 Ok(t)
             }
-            None => Err(self.span_err(
-                ErrKind::Syntax(SyntaxErr::UnexpectedEOF),
-                self.last.as_ref().unwrap().span.clone(),
-            )),
+            None => {
+                let span = self.cursor().unwrap().span;
+                Err(self.span_err(ErrKind::Syntax(SyntaxErr::UnexpectedEOF), span))
+            }
         }
     }
 
@@ -1267,11 +1267,11 @@ impl Parser {
         if self.peek_kind()? == expected {
             self.advance()
         } else {
-            let span = self.last.as_ref().unwrap().span.clone();
+            let span = self.cursor.as_ref().unwrap().span.clone();
             let diag = Diagnostic {
                 kind: ErrKind::Syntax(SyntaxErr::MissingToken {
                     expected: vec![expected],
-                    actual: self.peek_kind()?,
+                    actual: self.advance()?.kind,
                 }),
                 suggestions: vec![s.to_string()],
                 span,

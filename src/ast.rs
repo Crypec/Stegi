@@ -687,7 +687,7 @@ pub struct Call {
     pub args: Vec<Expr>,
 }
 
-#[derive(Hash, Clone)]
+#[derive(Hash, Debug, Clone)]
 pub struct Span {
     pub lo: usize,
     pub hi: usize,
@@ -705,13 +705,7 @@ impl PartialEq for Span {
 
 impl fmt::Display for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}..{}", self.lo, self.hi)
-    }
-}
-
-impl fmt::Debug for Span {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "[{:#?}] :: {}..{}", self.file, self.lo, self.hi)
     }
 }
 

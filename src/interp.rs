@@ -96,17 +96,6 @@ pub struct Interp {
     ty_table: HashMap<String, TyDecl>,
 }
 
-//macro_rules! bin_op {
-// 	($lhs:ident, $op:tt, $rhs:ident, $ty:pat) => {
-// 		let lhs = self.eval($lhs)?;
-// 		let rhs = self.eval($rhs)?;
-// 		match (lhs, rhs) {
-// 			($ty(a), $ty(b)) => $ty(a $op b),
-// 			_ => todo!(),
-// 		}
-// 	}
-// }
-
 impl From<Lit> for Value {
     fn from(l: Lit) -> Self {
         match l {
@@ -153,7 +142,6 @@ impl Interp {
         let mut params = fun.header.params;
         debug_assert_eq!(args.len(), params.len());
 
-        // FIXME(Simon): this needs to be a call to make_clean()!!!
         self.cxt.push_scope();
 
         for (p, a) in params.iter_mut().zip(args.iter()) {
@@ -383,7 +371,6 @@ impl Interp {
                     args_eval.push(self.eval(&arg)?);
                 }
                 debug_assert_eq!(fun.header.params.len(), args_eval.len());
-                dbg!(&args_eval);
                 self.cxt.push_frame();
                 for (p, arg) in fun.header.params.iter().zip(args_eval.iter()) {
                     self.cxt.insert(p.name.lexeme.clone(), arg.clone())

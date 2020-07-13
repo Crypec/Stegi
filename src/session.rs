@@ -33,7 +33,6 @@ impl Driver {
 
     pub fn start(&mut self) {
         let mut ast: Vec<Decl> = AST::new();
-        dbg!(&self.files);
         for file in &self.files {
             let lex_result = Lexer::new(&file.buf, file.path.clone())
                 .collect::<Result<Vec<Token>, Diagnostic>>();
@@ -45,7 +44,6 @@ impl Driver {
                 }
             };
             let t_stream = infer_semis(t_stream);
-
             let parse_result =
                 Parser::new(t_stream, &file.path).collect::<Vec<Result<Decl, Diagnostic>>>();
             let (nodes, errors): (Vec<_>, Vec<_>) =
@@ -59,9 +57,7 @@ impl Driver {
                     .map(Result::unwrap_err)
                     .collect::<Vec<Diagnostic>>(),
             );
-            dbg!(&self.diagnostics);
         }
-        dbg!(&ast);
         ImplReoderPass::new().reorder(&mut ast);
         self.diagnostics.extend(Typer::new().infer(&mut ast));
         if self.had_err() {

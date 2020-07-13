@@ -88,6 +88,12 @@ impl fmt::Display for TokenKind {
     }
 }
 
+impl fmt::Display for Token {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.kind)
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Operator {
     // math and boolean operator
@@ -458,8 +464,8 @@ impl<'a> Lexer<'a> {
     }
 
     fn yield_span(&self, start: usize) -> Span {
-        let end = start + self.cursor - 1;
-        Span::new(start, end, self.file.clone())
+        let d = self.cursor - start - 1;
+        Span::new(start, start + d, self.file.clone())
     }
 
     fn sub_string(&mut self, start: usize) -> String {
