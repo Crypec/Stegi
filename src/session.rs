@@ -67,7 +67,14 @@ impl Driver {
             }
             std::process::exit(1);
         }
-        Interp::new().interp(&mut ast);
+        self.diagnostics.extend(Interp::new().interp(&mut ast));
+        if self.had_err() {
+            eprintln!("Fehler beim Kompilieren gefunden. Programm wird nicht ausgefuehrt! :c\n");
+            for err in &self.diagnostics {
+                eprintln!("{}", err);
+            }
+            std::process::exit(1);
+        }
     }
 
     pub fn had_err(&self) -> bool {

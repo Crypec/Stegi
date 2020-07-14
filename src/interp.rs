@@ -69,7 +69,7 @@ impl fmt::Display for Value {
                     .join(", ");
                 write!(f, "({})", values)
             }
-            Value::Object((path, obj)) => write!(f, "{}:{:#?}", path, obj),
+            Value::Object((path, obj)) => write!(f, "{}: {:#?}", path, obj),
             Value::Fn(fun) => write!(f, "{:#?}", fun),
         }
     }
@@ -84,10 +84,7 @@ impl Value {
     }
 
     fn truthy(&self) -> bool {
-        match self {
-			Value::Bool(b) => *b,
-			_ => panic!("Tried to check if value other than bool is truthy, this should not happen and is most definitely a bug in our typechecker!"),
-		}
+        *cast!(self, Value::Bool)
     }
 }
 
@@ -95,6 +92,7 @@ pub struct Interp {
     // TODO(Simon): maybe we can refactor these into an "execution environment"?
     cxt: Cxt<String, Value>,
     ty_table: HashMap<String, TyDecl>,
+    err: Vec<Diagnostic>,
 }
 
 impl From<Lit> for Value {
@@ -116,6 +114,7 @@ impl Interp {
         Self {
             cxt: Cxt::new(),
             ty_table: HashMap::new(),
+            err: Vec::new(),
         }
     }
 
@@ -176,22 +175,18 @@ impl Interp {
         }
     }
 
-    pub fn interp(&mut self, ast: &mut AST) {
+    pub fn interp(&mut self, ast: &mut AST) -> Vec<Diagnostic> {
         self.fill_fn_table(ast);
         self.fill_ty_table(ast);
 
         for d in ast.iter_mut() {
             if let Decl::Fn(f) = d {
-                // TODO(Simon): we could clean this up a bit
-                // let found_main = false;
                 if f.header.name.lexeme == "Start" {
-                    self.run_block(&mut f.body).unwrap();
+                    self.run_block(&mut f.body);
                 }
-                // if !found_main {
-                //     self.span.clone()
-                // }
             }
         }
+        self.err.clone()
     }
 
     fn assign(&mut self, target: &AssingKind, to: Value) -> Result<(), Diagnostic> {
@@ -473,18 +468,22 @@ impl Interp {
                     }
                 }
             },
-            ExprKind::Var(ref var) | ExprKind::This(ref var) => {
-                Ok(self.cxt.get(&var.lexeme).unwrap().clone())
-            }
+            ExprKind::Var(ref var) | ExprKind::This(ref var) => Ok(self
+                .cxt
+                .get(&var.lexeme)
+                .expect("Var not found, most likely an issue in the type checker!")
+                .clone()),
         }
     }
 
     fn span_err(&mut self, kind: ErrKind, span: Span) -> Diagnostic {
-        Diagnostic {
+        self.err.push(Diagnostic {
             kind,
             span,
             suggestions: Vec::new(),
-        }
+        });
+        // FIXME(Simon): change back to mutable ref
+        self.err.last_mut().unwrap().clone()
     }
 }
 
@@ -545,10 +544,7 @@ impl<'a> Visitor for Interp {
                 self.cxt.push_scope();
                 let val = self.eval(&vardef.init)?;
                 let loop_var = vardef.pat.lexeme.clone();
-                let arr = match val {
-					Value::Array(a) => a,
-					_ => panic!("We can only iterate through arrays! If you are starring at this message trying to understand what happend, don't worry, this is most likely a bug in the typechecker!"),
-				};
+                let arr = cast!(val, Value::Array);
                 for elem in arr {
                     self.cxt.insert(loop_var.clone(), elem);
                     let ret = self.run_block(body)?;

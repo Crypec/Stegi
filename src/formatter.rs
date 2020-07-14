@@ -138,7 +138,7 @@ impl fmt::Display for Ident {
 
 impl fmt::Display for Ty {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{:#?}", self.kind)
+        write!(f, "{}", self.kind)
     }
 }
 

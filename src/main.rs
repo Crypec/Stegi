@@ -72,43 +72,40 @@ enum Stegi {
 fn main() {
     println!("################################ Stegi ################################ ");
 
-    let mut d = Driver::new(vec![Path::new("./examples/test.st").to_path_buf()]);
-    d.start();
+    match Stegi::from_args() {
+        Stegi::Start => {
+            if !Path::new("./Quellen").exists() {
+                println!("Quellenordner existiert nicht!");
+                panic!();
+            }
+            let mut files = Vec::new();
 
-    // match Stegi::from_args() {
-    //     Stegi::Start => {
-    //         if !Path::new("./Quellen").exists() {
-    //             println!("Quellenordner existiert nicht!");
-    //             panic!();
-    //         }
-    //         let mut files = Vec::new();
+            // FIXME(Simon): This does not recursively for subfolders containing .st files
+            for entry in glob("./Quellen/*.st")
+                .expect("Ordner mit Quelltextdatein konnte nicht eingelesen werden")
+            {
+                match entry {
+                    Ok(path) => files.push(path),
+                    Err(e) => eprintln!("{}", e),
+                }
+            }
+            let mut d = Driver::new(files);
+            d.start();
+        }
+        Stegi::New { name } => {
+            let dir = format!("./{}", name);
+            if let Err(e) = Repository::init(&dir) {
+                panic!("failed to init: {}", e);
+            };
+            let start_file = include_str!("../resources/start.st");
 
-    //         // FIXME(Simon): This does not recursively for subfolders containing .st files
-    //         for entry in glob("./Quellen/*.st")
-    //             .expect("Ordner mit Quelltextdatein konnte nicht eingelesen werden")
-    //         {
-    //             match entry {
-    //                 Ok(path) => files.push(path),
-    //                 Err(e) => eprintln!("{}", e),
-    //             }
-    //         }
-    //         let mut d = Driver::new(files);
-    //         d.start();
-    //     }
-    //     Stegi::New { name } => {
-    //         let dir = format!("./{}", name);
-    //         if let Err(e) = Repository::init(&dir) {
-    //             panic!("failed to init: {}", e);
-    //         };
-    //         let start_file = include_str!("../resources/start.st");
+            std::fs::create_dir(format!("./{}/Quellen", dir))
+                .expect("Quellenordner konnte nicht angelegt werden!");
 
-    //         std::fs::create_dir(format!("./{}/Quellen", dir))
-    //             .expect("Quellenordner konnte nicht angelegt werden!");
-
-    //         std::fs::write(format!("{}/Quellen/start.st", dir), start_file)
-    //             .expect("Schreiben der 'start' Datei fehlgeschlagen!");
-    //         println!("Neues Projekt {} angelegt!", name);
-    //         println!("{}", STEGI_ASCII);
-    //     }
-    // }
+            std::fs::write(format!("{}/Quellen/start.st", dir), start_file)
+                .expect("Schreiben der 'start' Datei fehlgeschlagen!");
+            println!("Neues Projekt {} angelegt!", name);
+            println!("{}", STEGI_ASCII);
+        }
+    }
 }

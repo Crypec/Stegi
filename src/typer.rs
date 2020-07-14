@@ -183,7 +183,7 @@ impl TyKind {
             TyKind::Tup(elems) => {
                 let mut sb = String::from("(");
                 for e in elems {
-                    sb.push_str(format!("{}", e.kind).as_str());
+                    sb.push_str(format!("{},", e.kind).as_str());
                 }
                 sb.push(')');
                 sb
@@ -474,13 +474,20 @@ impl Visitor for TyInferencePrePass {
             } => {
                 self.infer_expr(cond);
                 if !matches!(cond.ty.kind, TyKind::Bool) {
-                    self.span_err(
+                    let err = self.span_err(
                         ErrKind::Type(TypeErr::InvalidType {
                             expected: TyKind::Bool,
                             actual: cond.ty.clone(),
                         }),
                         cond.span.clone(),
-                    ).suggest("Die verschiedenen Vergleichsoperatornen wie [==, !=, >=, >, <=, <] erlauben es dir Werte untereinander zu vergleichen!");
+                    );
+                    err.suggest("Die verschiedenen Vergleichsoperatornen wie [==, !=, >=, >, <=, <] erlauben es dir Werte miteinander zu vergleichen!");
+                    if cond.ty.kind == TyKind::Num {
+                        err.suggest(format!(
+                            "Versuche doch eine Vergleichsoperation zu verwenden: {} != 0",
+                            cond
+                        ));
+                    }
                 }
                 self.infer_block(body);
                 for branch in else_branches {
@@ -890,8 +897,43 @@ impl Visitor for TyInferencePrePass {
                                 );
                             }
                         }
+                        expr.ty = Ty::default_unit_type(expr.span.clone());
                     }
-                    _ => todo!(),
+                    Intrinsic::Format => {
+                        let first = args.first().unwrap();
+                        if !matches!(first.ty.kind, TyKind::Text) {
+                            self.span_err(
+                                ErrKind::Type(TypeErr::InvalidType {
+                                    expected: TyKind::Text,
+                                    actual: first.ty.clone(),
+                                }),
+                                first.span.clone(),
+                            );
+                        }
+                        expr.ty.kind = TyKind::Text;
+                    }
+                    Intrinsic::Write => {
+                        let first = args.first().unwrap();
+                        if args.len() != 1 {
+                            self.span_err(
+                                ErrKind::Type(TypeErr::Parity {
+                                    expected: 1,
+                                    actual: args.len(),
+                                }),
+                                expr.span.clone(),
+                            );
+                        }
+                        if !matches!(first.ty.kind, TyKind::Text) {
+                            self.span_err(
+                                ErrKind::Type(TypeErr::InvalidType {
+                                    expected: TyKind::Text,
+                                    actual: first.ty.clone(),
+                                }),
+                                first.span.clone(),
+                            );
+                        }
+                        expr.ty = Ty::default_unit_type(expr.span.clone());
+                    }
                 }
             }
             ExprKind::Range(ref mut lo, ref mut hi) => {

@@ -102,7 +102,7 @@ impl fmt::Display for TypeErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self{
             TypeErr:: VarNotFound(varname) => write!(f, "Diese Variable `{}` haben wir nicht gefunden. Bitte Definiere und Initialisiere sie, bevor du sie benutzt.", varname),
-            TypeErr::InvalidType{expected, actual}=> write!(f, "Unerwarteter Typ '{}' gefunden erwartet haben wir '{}'", actual, expected),
+            TypeErr::InvalidType{expected, actual}=> write!(f, "Unerwarteter Typ '{}' gefunden erwartet haben wir '{}'!", actual.kind, expected),
             TypeErr::InfRec(a, b) => write!(f, "Unendlich rekursiver Typ entdeckt! Typ: {}, kommt in {} vor!!!", a, b),
             TypeErr::FieldNotFound{ty, field} => write!(f, "Der Datentyp {} hat kein Feld mit dem Namen '{}'!", ty, field),
 			TypeErr::TyNotFound(t) => write!(f, "Keine Defintion fuer den Datentyp {} gefunden", t),
@@ -239,6 +239,26 @@ impl Diagnostic {
         }
     }
 
+    fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
+        let line_str = format!(" {} {}", self.line_num().unwrap(), "|".bold());
+        let align = line_str.len() - 8;
+        let u_line = self.underline();
+
+        writeln!(f, "{:>a$}", "|".bold(), a = align)?;
+        writeln!(f, "{} {}", line_str, self.span_snippet().unwrap())?;
+        writeln!(
+            f,
+            "{:>a$} {:>u$}",
+            "|".bold(),
+            u_line.color(c).bold(),
+            a = align,
+            u = self.span.lo - self.line_span().unwrap().lo + u_line.len()
+        )?;
+
+        let msg = format!("{}", self.kind).color(c).bold();
+        writeln!(f, "{:>a$} {}", "|".bold(), msg, a = align)
+    }
+
     // fn write_code_snippet(&self, f: &mut fmt::Formatter, c: Color) -> fmt::Result {
     //     dbg!(self.span);
     // }
@@ -247,34 +267,35 @@ impl Diagnostic {
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let color = self.get_color();
-        let msg = format!("{}", self.kind).color(color).bold();
         writeln!(
             f,
-            "{} [{}] {}[{}]",
+            "{} {} {}[{}]",
             "--".bold(),
             self.get_kind().bold().color(color),
-            "------------------------------------------".bold(),
+            "-----------------------------------------------------------".bold(),
             self.span.file.to_str().unwrap().blue()
         )?;
-        write!(f, "\n{} {}", "->".bold(), msg);
+        //write!(f, "\n{} {}", "->".bold(), msg);
 
         let line_str = format!(" {} |", self.line_num().unwrap());
 
         let align = line_str.len();
         let u_line = self.underline();
 
-        writeln!(f, "{:>a$}", "|", a = align)?;
+        writeln!(f)?;
+        self.write_code_snippet(f, color);
+        // writeln!(f, "{:>a$}", "|", a = align)?;
 
-        writeln!(f, "{} {}", line_str, self.span_snippet().unwrap())?;
+        // writeln!(f, "{} {}", line_str, self.span_snippet().unwrap())?;
 
-        writeln!(
-            f,
-            "{:>a$} {:>u$}",
-            "|",
-            u_line.color(color).bold(),
-            a = align,
-            u = self.span.lo - self.line_span().unwrap().lo + u_line.len()
-        )?;
+        // writeln!(
+        //     f,
+        //     "{:>a$} {:>u$}",
+        //     "|",
+        //     u_line.color(color).bold(),
+        //     a = align,
+        //     u = self.span.lo - self.line_span().unwrap().lo + u_line.len()
+        // )?;
         // writeln!(
         //     f,
         //     "{:>a$} {}: {}",
@@ -283,10 +304,12 @@ impl fmt::Display for Diagnostic {
         //     self.kind,
         //     a = align
         // )?;
-
-        writeln!(f, "")?;
-        for sug in &self.suggestions {
-            writeln!(f, " • {}", sug)?;
+        if self.suggestions.len() != 0 {
+            writeln!(f)?;
+            writeln!(f, "{}", "Hilfe:".bold().underline())?;
+            for sug in &self.suggestions {
+                writeln!(f, " • {}", sug)?;
+            }
         }
         writeln!(f, "")
     }

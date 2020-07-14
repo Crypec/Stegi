@@ -99,13 +99,22 @@ impl Parser {
         loop {
             if let Ok(tk) = self.peek_kind() {
                 match tk {
-                    TokenKind::Keyword(Keyword::Struct)
-                    | TokenKind::Keyword(Keyword::Fun)
-                    | TokenKind::Keyword(Keyword::Impl) => return,
+                    TokenKind::Ident(_) => {
+                        if let (TokenKind::ColonEq, TokenKind::Keyword(Keyword::Fun)) =
+                            (self.look_ahead(2).unwrap(), self.look_ahead(3).unwrap())
+                        {
+                            return;
+                        } else {
+                            continue;
+                        }
+                    }
+                    TokenKind::Keyword(Keyword::Impl) => return,
                     TokenKind::EOF => {
                         return;
                     }
-                    _ => self.advance().unwrap(),
+                    _ => {
+                        self.advance().unwrap();
+                    }
                 };
             }
         }
@@ -116,17 +125,24 @@ impl Parser {
     }
 
     pub fn parse_decl(&mut self) -> ParseResult<Decl> {
+        if let TokenKind::Keyword(Keyword::Impl) = self.peek_kind()? {
+            return Ok(self.parse_impl()?);
+        }
+
+        let name = self.parse_ident()?;
+        self.expect(TokenKind::ColonEq, "Der := Operator erlaubt dir nicht nur Variablen zu definieren, sondern auch Funktionen und Typen zu deklarieren!")?;
+
         match self.peek_kind()? {
             TokenKind::Keyword(Keyword::Fun) => {
-                Ok(Decl::Fn(self.parse_fn(FnParsingMode::Function)?))
+                Ok(Decl::Fn(self.parse_fn(name, FnParsingMode::Function)?))
             }
+
+            TokenKind::Keyword(Keyword::Struct) => Ok(Decl::TyDecl(self.parse_ty(name)?)),
             TokenKind::Keyword(Keyword::Impl) => self.parse_impl(),
-            TokenKind::Keyword(Keyword::Struct) => Ok(Decl::TyDecl(self.parse_ty()?)),
             _ => {
                 let expected = vec![
                     TokenKind::Keyword(Keyword::Fun),
                     TokenKind::Keyword(Keyword::Struct),
-                    TokenKind::Keyword(Keyword::Impl),
                 ];
                 let t = self.advance()?;
                 let kind = ErrKind::Syntax(SyntaxErr::MissingToken {
@@ -138,10 +154,14 @@ impl Parser {
         }
     }
 
-    fn parse_ty(&mut self) -> ParseResult<TyDecl> {
-        match self.look_ahead(3)? {
-            TokenKind::LBrace => Ok(TyDecl::Struct(self.parse_struct()?)),
-            TokenKind::Eq => Ok(TyDecl::Enum(self.parse_enum()?)),
+    fn parse_ty(&mut self, name: Ident) -> ParseResult<TyDecl> {
+        self.expect(
+            TokenKind::Keyword(Keyword::Struct),
+            "Eigene Datentypen koennen dir helfen deine Programme zu vereinfachen!",
+        )?;
+        match self.peek_kind()? {
+            TokenKind::LBrace => Ok(TyDecl::Struct(self.parse_struct(name)?)),
+            TokenKind::Eq => Ok(TyDecl::Enum(self.parse_enum(name)?)),
             _ => {
                 let span = self.cursor.as_ref().unwrap().span.clone();
                 let kind = ErrKind::Syntax(SyntaxErr::MissingToken {
@@ -153,16 +173,11 @@ impl Parser {
         }
     }
 
-    fn parse_fn_header(&mut self, parse_mode: FnParsingMode) -> ParseResult<FnSig> {
-        let start = self
-            .expect(
-                TokenKind::Keyword(Keyword::Fun),
-                "An dieser Stelle haben wir das `fun` oder `funktion` Schlüsselwort erwartet!", //torben
-            )?
-            .span
-            .clone();
-
-        let name = self.parse_ident()?;
+    fn parse_fn_header(&mut self, name: Ident, parse_mode: FnParsingMode) -> ParseResult<FnSig> {
+        self.expect(
+            TokenKind::Keyword(Keyword::Fun),
+            "An dieser Stelle haben wir das 'fun' Schluesselwort erwartet",
+        )?;
         self.expect(
             TokenKind::LParen,
             "An dieser Stelle haben wir eine öffnende Klammer `(` erwartet!",
@@ -174,7 +189,6 @@ impl Parser {
             FnParsingMode::Method(p) => {
                 if self.peek_kind()? == TokenKind::Keyword(Keyword::This) {
                     self.advance()?;
-
                     let self_ty = Ty {
                         kind: TyKind::Path(p.clone()),
                         span: p.span.clone(),
@@ -232,7 +246,7 @@ impl Parser {
                 Ty::default_unit_type(sp)
             }
         };
-        let span = ret_ty.span.clone().combine(&start);
+        let span = ret_ty.span.clone().combine(&name.span);
         Ok(FnSig {
             name,
             params,
@@ -241,8 +255,8 @@ impl Parser {
         })
     }
 
-    fn parse_fn(&mut self, parse_mode: FnParsingMode) -> ParseResult<FnDecl> {
-        let header = self.parse_fn_header(parse_mode)?;
+    fn parse_fn(&mut self, name: Ident, parse_mode: FnParsingMode) -> ParseResult<FnDecl> {
+        let header = self.parse_fn_header(name, parse_mode)?;
         let body = self.parse_block(BlockParsingMode::Normal)?;
         let span = header.span.clone().combine(&body.span.clone());
         Ok(FnDecl { header, body, span })
@@ -566,7 +580,6 @@ impl Parser {
             .span.clone();
 
         let impl_target = self.parse_path()?;
-
         self.expect(
             TokenKind::LBrace,
             "An dieser Stelle haben wie eine geschweifte öffnende Klammer `{` erwartet!", //torben
@@ -575,9 +588,11 @@ impl Parser {
         loop {
             match self.peek_kind()? {
                 TokenKind::RBrace => break,
-                TokenKind::Keyword(Keyword::Fun) => {
+                TokenKind::Ident(_) => {
                     let mode = FnParsingMode::Method(impl_target.clone());
-                    fn_decls.push(self.parse_fn(mode)?);
+                    let name = self.parse_ident()?;
+                    self.expect(TokenKind::ColonEq, "Der := Operator erlaubt dir nicht nur Variablen zu definieren, sondern auch Funktionen und Typen zu deklarieren!")?;
+                    fn_decls.push(self.parse_fn(name, mode)?);
                 }
                 _ => {
                     let sp = self.cursor.as_ref().unwrap().span.clone();
@@ -605,19 +620,13 @@ impl Parser {
         })
     }
 
-    fn parse_struct(&mut self) -> ParseResult<Struct> {
-        let start = self
-            .expect(TokenKind::Keyword(Keyword::Struct), "An dieser Stelle haben wir das Typenschlüsselwort `Typ` erwartet. Schau bitte dass, das du das hinzfügst.")?
-            .span;
-        let name = self.parse_ident()?;
-
-        let mut fields = HashMap::new();
-
+    fn parse_struct(&mut self, name: Ident) -> ParseResult<Struct> {
         self.expect(
             TokenKind::LBrace,
             "An dieser Stelle haben wie eine geschweifte öffnende Klammer `{` erwartet!",
         )?;
 
+        let mut fields = HashMap::new();
         while self.peek_kind()? != TokenKind::RBrace {
             let name = self.parse_ident()?;
             self.expect(TokenKind::Colon, "An dieser Stelle haben wir den Namen deines Feldes erwartet. Schau bitte, dass du deinem Feld einen Namen gibst, damit du es wieder findest.")?;
@@ -636,23 +645,16 @@ impl Parser {
                 "An dieser Stelle haben wie eine geschweifte schließende Klammer `}` erwartet!",
             )?
             .span;
+        let span = name.span.combine(&end);
         Ok(Struct {
             name,
             fields,
             methods: HashMap::new(),
-            span: start.combine(&end),
+            span,
         })
     }
 
-    fn parse_enum(&mut self) -> ParseResult<Enum> {
-        let start = self
-            .expect(
-                TokenKind::Keyword(Keyword::Struct),
-                "An dieser Stelle haben wir eine Deklaration eines Enumerations oder Strukturdatentypen erwartet!",
-            )?
-            .span
-            .clone();
-        let name = self.parse_ident()?;
+    fn parse_enum(&mut self, name: Ident) -> ParseResult<Enum> {
         self.expect(TokenKind::Eq, "Wir haben hier eine Gleichheitszeichen `=` erwartet. Du musst es benutzen um Zuordnungen zu machen.")?;
         let mut variants = Vec::new();
         loop {
@@ -669,11 +671,12 @@ impl Parser {
             Some(v) => v.span.clone(),
             None => name.span.clone(),
         };
+        let span = name.span.combine(&end);
         Ok(Enum {
             name,
             variants,
             methods: HashMap::new(),
-            span: start.combine(&end),
+            span,
         })
     }
 
