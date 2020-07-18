@@ -1,5 +1,11 @@
 #![feature(box_syntax, box_patterns)]
-#![allow(unused_imports, dead_code, unused_variables, unused_must_use)]
+#![allow(
+    unused_imports,
+    dead_code,
+    unused_variables,
+    unreachable_code,
+    unused_must_use
+)]
 #![warn(clippy::pendantic)]
 use glob::glob;
 use std::path::*;
@@ -20,6 +26,8 @@ mod typer;
 
 extern crate structopt;
 
+use crate::ast::Span;
+use crate::errors::*;
 use structopt::StructOpt;
 
 use git2::Repository;
@@ -75,8 +83,25 @@ fn main() {
     match Stegi::from_args() {
         Stegi::Start => {
             if !Path::new("./Quellen").exists() {
-                println!("Quellenordner existiert nicht!");
-                panic!();
+                eprintln!(
+                    "{}",
+                    Diagnostic {
+                        kind: ErrKind::Internal(
+                            "Wir konnten kein Quellenverzeichnis finden!".to_string()
+                        ),
+                        span: Span {
+                            hi: 0,
+                            lo: 0,
+                            file: Path::new("./Quellen").to_path_buf(),
+                        },
+                        suggestions: vec![
+                            "Bist du in einem Stegi Projekt".to_string(),
+                            "Hast du die noetigen Berechtigungen um die Projektdateien zu lesen!"
+                                .to_string(),
+                        ]
+                    }
+                );
+                std::process::exit(1)
             }
             let mut files = Vec::new();
 
@@ -95,7 +120,21 @@ fn main() {
         Stegi::New { name } => {
             let dir = format!("./{}", name);
             if let Err(e) = Repository::init(&dir) {
-                panic!("failed to init: {}", e);
+                eprintln!(
+                    "{}",
+                    Diagnostic {
+                        kind: ErrKind::Internal(
+                            "Git Repository konnte nicht erstellt werden".to_string()
+                        ),
+                        span: Span {
+                            hi: 0,
+                            lo: 0,
+                            file: Path::new(&dir).to_path_buf(),
+                        },
+                        suggestions: vec!["Hast du git instaliert?".to_string(),]
+                    }
+                );
+                std::process::exit(1)
             };
             let start_file = include_str!("../resources/start.st");
 
