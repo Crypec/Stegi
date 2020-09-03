@@ -10,7 +10,7 @@
 
 
 ## Stegi installieren
-Stegi ist in der Progammiersprache [Rust](https://www.rust-lang.org/) geschriben. Du musst also eine Version des Rustkompilers auf deinem System installieren.
+Stegi ist in der Progammiersprache [Rust](https://www.rust-lang.org/) geschrieben. Du musst also eine Version des Rustkompilers auf deinem System installieren.
 Danach kannst du dieses Repository mit [git](https://git-scm.com/) klonen.
 ``` bash
 git clone git@github.com:Crypec/Stegi.git #Projekt von Github herunterladen.
